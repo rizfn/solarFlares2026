@@ -64,6 +64,27 @@ void addNewSpots(std::vector<long long> &state, int L, int N, std::vector<int> &
             }
         }
     }
+
+    // Fallback: randomly place if no neighbors found
+    std::uniform_int_distribution<> disLoc(0, L * L - 1);
+    if (!posNbrFound)
+    {
+        int randomLoc;
+        do {
+            randomLoc = disLoc(gen);
+        } while (state[randomLoc] != 0);
+        state[randomLoc] = 1;
+        filledLocs.push_back(randomLoc);
+    }
+    if (!negNbrFound)
+    {
+        int randomLoc;
+        do {
+            randomLoc = disLoc(gen);
+        } while (state[randomLoc] != 0);
+        state[randomLoc] = -1;
+        filledLocs.push_back(randomLoc);
+    }
 }
 
 int update(std::vector<long long> &state, int L, int N, std::ofstream &emissionFile, double currentStep, std::vector<int> &filledLocs)
@@ -73,11 +94,12 @@ int update(std::vector<long long> &state, int L, int N, std::ofstream &emissionF
     long long stateVal = state[spotLoc];
     std::uniform_real_distribution<> disReal(0.0, 1.0);
     int newSpotLoc;
-    if (disReal(gen) < 0.25)
+    double r = disReal(gen);
+    if (r < 0.25)
         newSpotLoc = ((spotLoc / L - 1 + L) % L) * L + spotLoc % L; // up
-    else if (disReal(gen) < 0.5)
+    else if (r < 0.5)
         newSpotLoc = ((spotLoc / L + 1) % L) * L + spotLoc % L;     // down
-    else if (disReal(gen) < 0.75)
+    else if (r < 0.75)
         newSpotLoc = spotLoc / L * L + (spotLoc % L - 1 + L) % L;   // left
     else
         newSpotLoc = spotLoc / L * L + (spotLoc % L + 1) % L;       // right

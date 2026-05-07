@@ -1,0 +1,10 @@
+[project]
+name = "solarflares2026"
+version = "0.1.0"
+description = "Add your description here"
+readme = "readme.md"
+requires-python = ">=3.13"
+dependencies = [
+    "matplotlib>=3.10.9",
+    "numba>=0.65.1",
+]

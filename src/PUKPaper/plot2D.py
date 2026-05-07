@@ -5,14 +5,14 @@ def power_law(x, tau, alpha):
     return alpha * x**-tau
 
 def plot_Neighbour():
-    L = 128
+    L = 64
     density = 0.2
     steps = 1000000
 
     tau_spot = 1.5
     tau_emission = 1.9
 
-    spot_size_file_path = f'PUK_paper/outputs/2DNeighbour/spotSize_L_{L}_density_{density}_steps_{steps}.tsv'  # Replace with your actual file path
+    spot_size_file_path = f'src/PUKPaper/outputs/2DNeighbour/spotSize_L_{L}_density_{density}_steps_{steps}.tsv'
     emission_file_path = spot_size_file_path.replace('spotSize', 'emission')
 
     # Initialize empty lists to store spot sizes and emission sizes
@@ -90,7 +90,7 @@ def plot_Neighbour():
     ax2.legend()
 
     plt.tight_layout()
-    plt.savefig(f'PUK_paper/plots/2DNeighbour/L_{L}_density_{density}_steps_{steps}.png', dpi=300)
+    plt.savefig(f'src/PUKPaper/plots/2DNeighbour/L_{L}_density_{density}_steps_{steps}.png', dpi=300)
     plt.show()
 
 
@@ -102,7 +102,7 @@ def plot_random():
     tau_spot = 2
     tau_emission = 3
 
-    spot_size_file_path = f'PUK_paper/outputs/2DRandom/spotSize_L_{L}_density_{density}_steps_{steps}.tsv'  # Replace with your actual file path
+    spot_size_file_path = f'src/PUKPaper/outputs/2DRandom/spotSize_L_{L}_density_{density}_steps_{steps}.tsv'  # Replace with your actual file path
     emission_file_path = spot_size_file_path.replace('spotSize', 'emission')
 
     # Initialize empty lists to store spot sizes and emission sizes
@@ -180,7 +180,7 @@ def plot_random():
     ax2.legend()
 
     plt.tight_layout()
-    plt.savefig(f'PUK_paper/plots/2DRandom/L_{L}_density_{density}_steps_{steps}.png', dpi=300)
+    plt.savefig(f'src/PUKPaper/plots/2DRandom/L_{L}_density_{density}_steps_{steps}.png', dpi=300)
     plt.show()
 
 
