@@ -15,9 +15,8 @@ def plot_Neighbour():
     spot_size_file_path = f'src/PUKPaper/outputs/2DNeighbour/spotSize_L_{L}_density_{density}_steps_{steps}.tsv'
     emission_file_path = spot_size_file_path.replace('spotSize', 'emission')
 
-    # Initialize empty lists to store spot sizes and emission sizes
+    # Initialize an empty list to store spot sizes
     spot_sizes = []
-    emission_sizes = []
 
     # Read the spot size file line by line
     with open(spot_size_file_path, 'r') as file:
@@ -27,18 +26,19 @@ def plot_Neighbour():
                 sizes = list(map(int, filter(None, parts[1].split(','))))
                 spot_sizes.extend(sizes)
 
-    # Read the emission file line by line
-    with open(emission_file_path, 'r') as file:
-        for line in file:
-            emission_sizes.append(int(line.strip()))
+    # Read the emission histogram file: two columns, "size\tcount"
+    emission_data = np.loadtxt(emission_file_path, dtype=np.int64, ndmin=2)
+    emission_sizes = emission_data[:, 0]
+    emission_counts = emission_data[:, 1]
 
-    # Convert the lists to numpy arrays
+    # Convert the list to a numpy array
     spot_sizes = np.abs(np.array(spot_sizes))
-    emission_sizes = np.array(emission_sizes)
 
     # Filter out non-positive values  todo: is this needed??
     spot_sizes = spot_sizes[spot_sizes > 0]
-    emission_sizes = emission_sizes[emission_sizes > 0]
+    emission_mask = emission_sizes > 0
+    emission_sizes = emission_sizes[emission_mask]
+    emission_counts = emission_counts[emission_mask]
 
     # Create log-spaced bins for spot sizes
     min_size_spot = np.min(spot_sizes)
@@ -56,7 +56,7 @@ def plot_Neighbour():
     bins_emission = np.geomspace(min_size_emission, max_size_emission, num=50)
 
     # Compute the histogram for emission sizes
-    hist_emission, bin_edges_emission = np.histogram(emission_sizes, bins=bins_emission)
+    hist_emission, bin_edges_emission = np.histogram(emission_sizes, bins=bins_emission, weights=emission_counts)
     bin_widths_emission = np.diff(bin_edges_emission)
     hist_normalized_emission = hist_emission / bin_widths_emission
 
@@ -105,9 +105,8 @@ def plot_random():
     spot_size_file_path = f'src/PUKPaper/outputs/2DRandom/spotSize_L_{L}_density_{density}_steps_{steps}.tsv'  # Replace with your actual file path
     emission_file_path = spot_size_file_path.replace('spotSize', 'emission')
 
-    # Initialize empty lists to store spot sizes and emission sizes
+    # Initialize an empty list to store spot sizes
     spot_sizes = []
-    emission_sizes = []
 
     # Read the spot size file line by line
     with open(spot_size_file_path, 'r') as file:
@@ -117,18 +116,19 @@ def plot_random():
                 sizes = list(map(int, filter(None, parts[1].split(','))))
                 spot_sizes.extend(sizes)
 
-    # Read the emission file line by line
-    with open(emission_file_path, 'r') as file:
-        for line in file:
-            emission_sizes.append(int(line.strip()))
+    # Read the emission histogram file: two columns, "size\tcount"
+    emission_data = np.loadtxt(emission_file_path, dtype=np.int64, ndmin=2)
+    emission_sizes = emission_data[:, 0]
+    emission_counts = emission_data[:, 1]
 
-    # Convert the lists to numpy arrays
+    # Convert the list to a numpy array
     spot_sizes = np.abs(np.array(spot_sizes))
-    emission_sizes = np.array(emission_sizes)
 
     # Filter out non-positive values
     spot_sizes = spot_sizes[spot_sizes > 0]
-    emission_sizes = emission_sizes[emission_sizes > 0]
+    emission_mask = emission_sizes > 0
+    emission_sizes = emission_sizes[emission_mask]
+    emission_counts = emission_counts[emission_mask]
 
     # Create log-spaced bins for spot sizes
     min_size_spot = np.min(spot_sizes)
@@ -146,7 +146,7 @@ def plot_random():
     bins_emission = np.geomspace(min_size_emission, max_size_emission, num=50)
 
     # Compute the histogram for emission sizes
-    hist_emission, bin_edges_emission = np.histogram(emission_sizes, bins=bins_emission)
+    hist_emission, bin_edges_emission = np.histogram(emission_sizes, bins=bins_emission, weights=emission_counts)
     bin_widths_emission = np.diff(bin_edges_emission)
     hist_normalized_emission = hist_emission / bin_widths_emission
 
@@ -186,4 +186,4 @@ def plot_random():
 
 if __name__ == "__main__":
     plot_Neighbour()
-    # plot_random()
+    # plot_random()

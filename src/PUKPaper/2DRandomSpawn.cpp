@@ -2,6 +2,7 @@
 #include <random>
 #include <fstream>
 #include <vector>
+#include <unordered_map>
 #include <algorithm>
 #include <string>
 #include <iomanip>
@@ -15,7 +16,68 @@ constexpr int RECORDING_INTERVAL = 100;
 std::random_device rd;
 std::mt19937 gen(rd());
 
-void addNewSpots(std::vector<long long> &state, int L, int N, std::vector<int> &filledLocs)
+struct EmissionHist
+{
+    static constexpr long long LIMIT = 1LL << 22;
+    std::vector<long long> small;
+    std::unordered_map<long long, long long> large;
+
+    EmissionHist() : small(1024, 0) {}
+
+    void add(long long e)
+    {
+        if (e >= LIMIT)
+        {
+            ++large[e];
+            return;
+        }
+        if (e >= static_cast<long long>(small.size()))
+        {
+            long long newSize = static_cast<long long>(small.size());
+            while (newSize <= e)
+                newSize *= 2;
+            small.resize(std::min(newSize, LIMIT), 0);
+        }
+        ++small[e];
+    }
+
+    void write(std::ofstream &file) const
+    {
+        file << "# emissionSize\tcount\n";
+        for (long long i = 0; i < static_cast<long long>(small.size()); ++i)
+            if (small[i] != 0)
+                file << i << "\t" << small[i] << "\n";
+        std::vector<long long> sizes;
+        for (const auto &entry : large)
+            sizes.push_back(entry.first);
+        std::sort(sizes.begin(), sizes.end());
+        for (long long size : sizes)
+            file << size << "\t" << large.at(size) << "\n";
+    }
+};
+
+void addFilled(int loc, std::vector<int> &filledLocs, std::vector<int> &pos)
+{
+    pos[loc] = static_cast<int>(filledLocs.size());
+    filledLocs.push_back(loc);
+}
+
+void removeFilledAt(int idx, std::vector<int> &filledLocs, std::vector<int> &pos)
+{
+    int loc = filledLocs[idx];
+    int last = filledLocs.back();
+    filledLocs[idx] = last;
+    pos[last] = idx;
+    filledLocs.pop_back();
+    pos[loc] = -1;
+}
+
+void removeFilledLoc(int loc, std::vector<int> &filledLocs, std::vector<int> &pos)
+{
+    removeFilledAt(pos[loc], filledLocs, pos);
+}
+
+void addNewSpots(std::vector<long long> &state, int L, int N, std::vector<int> &filledLocs, std::vector<int> &pos)
 {
     bool posFound = false, negFound = false;
     std::uniform_int_distribution<> dis(0, L * L - 1);
@@ -28,60 +90,62 @@ void addNewSpots(std::vector<long long> &state, int L, int N, std::vector<int> &
             if (!posFound)
             {
                 state[randomLoc] = 1;
-                filledLocs.push_back(randomLoc);
+                addFilled(randomLoc, filledLocs, pos);
                 posFound = true;
             }
             else if (!negFound)
             {
                 state[randomLoc] = -1;
-                filledLocs.push_back(randomLoc);
+                addFilled(randomLoc, filledLocs, pos);
                 negFound = true;
             }
         }
     }
 }
 
-int update(std::vector<long long> &state, int L, int N, std::ofstream &emissionFile, double currentStep, std::vector<int> &filledLocs)
+int update(std::vector<long long> &state, int L, int N, EmissionHist &emissionHist, std::vector<int> &filledLocs, std::vector<int> &pos)
 {
     std::uniform_int_distribution<> dis(0, filledLocs.size() - 1);
-    int spotLoc = filledLocs[dis(gen)];
+    int idx = dis(gen);
+    int spotLoc = filledLocs[idx];
     long long stateVal = state[spotLoc];
     std::uniform_real_distribution<> disReal(0.0, 1.0);
     int newSpotLoc;
-    if (disReal(gen) < 0.25)
+    double r = disReal(gen);
+    if (r < 0.25)
         newSpotLoc = ((spotLoc / L - 1 + L) % L) * L + spotLoc % L; // up
-    else if (disReal(gen) < 0.5)
+    else if (r < 0.5)
         newSpotLoc = ((spotLoc / L + 1) % L) * L + spotLoc % L;     // down
-    else if (disReal(gen) < 0.75)
+    else if (r < 0.75)
         newSpotLoc = spotLoc / L * L + (spotLoc % L - 1 + L) % L;   // left
     else
         newSpotLoc = spotLoc / L * L + (spotLoc % L + 1) % L;       // right
 
     long long currentNewLocVal = state[newSpotLoc];
     long long emiss = 0;
-    filledLocs.erase(std::remove(filledLocs.begin(), filledLocs.end(), spotLoc), filledLocs.end());
+    removeFilledAt(idx, filledLocs, pos);
     if (currentNewLocVal != 0)
     {
         if (stateVal * currentNewLocVal < 0)
         {
             emiss = std::min(std::abs(stateVal), std::abs(currentNewLocVal));
-            emissionFile << emiss << "\n";
+            emissionHist.add(emiss);
         }
         if (stateVal == -currentNewLocVal)
         {
-            filledLocs.erase(std::remove(filledLocs.begin(), filledLocs.end(), newSpotLoc), filledLocs.end());
+            removeFilledLoc(newSpotLoc, filledLocs, pos);
         }
     }
     else
     {
-        filledLocs.push_back(newSpotLoc);
+        addFilled(newSpotLoc, filledLocs, pos);
     }
     state[newSpotLoc] += stateVal;
     state[spotLoc] -= stateVal;
 
-    if (filledLocs.size() < N)
+    if (static_cast<int>(filledLocs.size()) < N)
     {
-        addNewSpots(state, L, N, filledLocs);
+        addNewSpots(state, L, N, filledLocs, pos);
     }
 
     return emiss;
@@ -95,23 +159,26 @@ void run(std::ofstream &spotSizeFile, std::ofstream &emissionFile, int L, int N,
     std::shuffle(state.begin(), state.end(), gen);
 
     std::vector<int> filledLocs;
+    filledLocs.reserve(2 * N + 8);
+    std::vector<int> pos(L * L, -1);
     for (int i = 0; i < L * L; ++i)
     {
         if (state[i] != 0)
-            filledLocs.push_back(i);
+            addFilled(i, filledLocs, pos);
     }
+
+    EmissionHist emissionHist;
 
     for (int step = 0; step < stepsPerLatticepoint; ++step)
     {
         for (int i = 0; i < L * L; ++i)
         {
-            double currentStep = step + static_cast<double>(i) / (L * L);
-            update(state, L, N, emissionFile, currentStep, filledLocs);
+            update(state, L, N, emissionHist, filledLocs, pos);
         }
         if ((step >= recordingStep) && (step % RECORDING_INTERVAL == 0))
         {
             spotSizeFile << step << "\t";
-            for (int val : state)
+            for (long long val : state)
             {
                 if (val != 0)
                 {
@@ -121,9 +188,11 @@ void run(std::ofstream &spotSizeFile, std::ofstream &emissionFile, int L, int N,
             spotSizeFile.seekp(-1, std::ios_base::cur); // Remove the last comma
             spotSizeFile << "\n";
         }
-        std::cout << "Progress: " << std::fixed << std::setprecision(2) << static_cast<double>(step) / stepsPerLatticepoint * 100 << "%\r" << std::flush;
+        if (step % 1000 == 0)
+            std::cout << "Progress: " << std::fixed << std::setprecision(2) << static_cast<double>(step) / stepsPerLatticepoint * 100 << "%\r" << std::flush;
     }
 
+    emissionHist.write(emissionFile);
     emissionFile.close();
     spotSizeFile.close();
 }
@@ -146,6 +215,7 @@ int main(int argc, char *argv[])
 
     std::string exePath = argv[0];
     std::string exeDir = std::filesystem::path(exePath).parent_path().string();
+    std::filesystem::create_directories(exeDir + "/outputs/2DRandom");
     std::ostringstream spotSizePathStream;
     spotSizePathStream << exeDir << "/outputs/2DRandom/spotSize_L_" << L << "_density_" << density << "_steps_" << stepsPerLatticepoint << ".tsv";
     std::string spotSizePath = spotSizePathStream.str();
