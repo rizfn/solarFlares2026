@@ -76,43 +76,19 @@ def xi(snaps):
     return z[0] if len(z) else lim
 
 
-def xi_exp(snaps, c=2.5):
-    # decay rate of |C(r)| fitted from r=1; window is self-consistently ~c*xi, so it
-    # tracks xi rather than L (a window tied to L makes different boxes disagree)
+def xi_exp(snaps, rmax=6):
+    # Decay rate of |C(r)| fitted from r=1 over a short window fixed in lattice units.
+    # Neutrality (sum_r C(r) = 0) makes the tail of C an artifact of the box: at fixed p
+    # it grows with L, while r<~4 is L-independent. Only the short range is physical, so
+    # the window must not follow the tail (a self-consistent window chases it and gives
+    # xi proportional to L).
     C = correlation(snaps)
-    L = snaps[0].shape[0]
-
-    # neutrality forces C to change sign; fit only the leading constant-sign stretch
-    rsign = L // 4
-    for r in range(2, L // 4):
-        if np.sign(C[r]) != np.sign(C[1]):
-            rsign = r - 1
-            break
-    if rsign < 2:  # only C(1) survives; xi is unmeasurable at the sign-change crossover
+    r = np.arange(1, rmax + 1)
+    y = np.abs(C[1:rmax + 1])
+    if (y <= 0).any() or abs(C[2]) > abs(C[1]):
         return np.nan
-    if abs(C[2]) > abs(C[1]):  # C(1) sitting on its zero crossing: not a decaying tail
-        return np.nan
-
-    def fit(rmax):
-        rmax = min(rmax, rsign)
-        r = np.arange(1, rmax + 1)
-        y = np.abs(C[1:rmax + 1])
-        slope = np.polyfit(r, np.log(y), 1)[0]
-        return -1.0 / slope if slope < 0 else np.nan
-
-    v = fit(6)
-    for _ in range(20):
-        if not np.isfinite(v):
-            return np.nan
-        nv = fit(int(np.clip(round(c * v), 2, L // 4)))
-        if not np.isfinite(nv):
-            return np.nan
-        converged = abs(nv - v) < 1e-3
-        v = nv
-        if converged:
-            break
-    # a length beyond L/4 is not resolvable in the box; don't report it
-    return v if v < L / 4 else np.nan
+    slope = np.polyfit(r, np.log(y), 1)[0]
+    return -1.0 / slope if slope < 0 else np.nan
 
 
 def plot_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
@@ -156,10 +132,10 @@ def plot_correlation_length(L=128, rhos=(0.2, 0.4, 0.6, 0.8),
     plt.close(fig)
 
 
-def plot_critical_scaling(rho=0.2, Ls=(64, 128, 256, 512), fitL=512,
+def plot_critical_scaling(rho=0.2, Ls=(64, 128, 256, 512), fitL=256,
                           ps=(0.30, 0.36, 0.40, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48,
                               0.49, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58,
-                              0.60, 0.61, 0.64, 0.67, 0.70)):
+                              0.60, 0.61, 0.64, 0.67, 0.70, 0.80, 0.90, 1.00)):
     data = {}
     for L in Ls:
         xs, ys = [], []
@@ -180,7 +156,7 @@ def plot_critical_scaling(rho=0.2, Ls=(64, 128, 256, 512), fitL=512,
     # a power law cannot be fitted through a saturating curve; refuse rather than rail
     fitted = len(fx) >= 4
     if fitted:
-        pcs, nus = np.arange(fx.max() + 0.005, 0.90, 0.002), np.arange(0.3, 3.0, 0.01)
+        pcs, nus = np.arange(fx.max() + 0.005, 1.60, 0.002), np.arange(0.3, 3.0, 0.01)
         best = (1e18, 0.0, 0.0)
         for pc in pcs:
             for nu in nus:
