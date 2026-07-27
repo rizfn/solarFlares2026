@@ -11,8 +11,14 @@ PLOTS = os.path.join(DIR, "plots")
 plt.rcParams.update({"font.size": 18, "axes.labelsize": 22, "xtick.labelsize": 16,
                      "ytick.labelsize": 16, "legend.fontsize": 15})
 
+XMIN = 10   # lower cutoff of the power-law fits, in flux units
+
 def g(v):
     return f"{v:g}"
+
+def grid(ax):
+    ax.grid(True, which="major", ls=":", lw=0.9, alpha=0.6)
+    ax.set_axisbelow(True)
 
 def tag(L, rho, p):
     return f"L_{g(L)}_rho_{g(rho)}_p_{g(p)}"
@@ -44,11 +50,67 @@ def logbin(sizes, counts, nb=26):
     return x[ok], (h / w / counts.sum())[ok]
 
 def load_snaps(L, rho, p):
-    # all snapshots across seeds; loadtxt skips the blank separators, so reshape into LxL
+    # all snapshots across seeds; blank separators are skipped, so reshape into LxL.
+    # a run killed mid-write leaves a short final row, so keep only complete rows.
     snaps = []
     for path in files("snapshots", L, rho, p):
-        snaps.extend(np.loadtxt(path, dtype=np.int8).reshape(-1, L, L))
+        rows = []
+        with open(path) as fh:
+            for line in fh:
+                f = line.split()
+                if len(f) == L:
+                    rows.append(np.fromiter(map(int, f), dtype=np.int8, count=L))
+        n = len(rows) // L
+        if n:
+            snaps.extend(np.array(rows[:n * L]).reshape(n, L, L))
+    if not snaps:
+        raise OSError(f"no usable snapshots for {tag(L, rho, p)}")
     return snaps
+
+
+def mle(sizes, counts, xmin=XMIN):
+    # Hill estimator for a discrete power law above xmin (the -1/2 is the continuity
+    # correction; without it tau is biased high when xmin is small)
+    m = sizes >= xmin
+    s, c = sizes[m], counts[m]
+    if c.sum() < 100:
+        return np.nan
+    return 1 + c.sum() / np.sum(c * np.log(s / (xmin - 0.5)))
+
+
+def segregation(snaps, b=None):
+    # Order parameter: mean |magnetization| of a b x b block, normalized by its
+    # occupancy. A mixed surface still gives a nonzero value from sqrt(n) noise, so
+    # subtract that floor in quadrature by re-measuring on sign-shuffled snapshots.
+    L = snaps[0].shape[0]
+    b = b or L // 4
+    rng = np.random.default_rng(0)
+    raw, floor = [], []
+    for a in snaps:
+        s = np.sign(a).astype(float)
+        t = s.ravel().copy()
+        occ = t != 0
+        v = t[occ]; rng.shuffle(v); t[occ] = v
+        for field, acc in ((s, raw), (t.reshape(L, L), floor)):
+            blk = field.reshape(L // b, b, L // b, b)
+            num = np.abs(blk.sum(axis=(1, 3)))
+            den = np.abs(blk).sum(axis=(1, 3))
+            acc.append((num[den > 0] / den[den > 0]).mean())
+    m, m0 = np.mean(raw), np.mean(floor)
+    return np.sqrt(max(m * m - m0 * m0, 0.0))
+
+def same_sign_frac(snaps):
+    # q: fraction of occupied nearest-neighbour pairs that share a sign. A collision is
+    # always between neighbours, so this is the branching ratio of the kinetic theory:
+    # 1/2 when mixed, -> 1 when segregated.
+    same = opp = 0
+    for a in snaps:
+        s = np.sign(a).astype(np.int8)
+        for b in (np.roll(s, 1, 0), np.roll(s, 1, 1)):
+            pr = s * b
+            same += (pr > 0).sum(); opp += (pr < 0).sum()
+    return same / (same + opp)
+
 
 def correlation(snaps):
     # conditional sign correlation over occupied pairs, averaged over snapshots
@@ -127,6 +189,7 @@ def plot_correlation_length(L=128, rhos=(0.2, 0.4, 0.6, 0.8),
     ax.set_xlabel("neighbour probability $p$")
     ax.set_ylabel(r"correlation length $\xi$")
     ax.legend(frameon=False)
+    grid(ax)
     fig.tight_layout()
     fig.savefig(os.path.join(PLOTS, "correlationLength", f"correlationLength_L_{g(L)}.png"), dpi=300)
     plt.close(fig)
@@ -183,6 +246,7 @@ def plot_critical_scaling(rho=0.2, Ls=(64, 128, 256, 512), fitL=256,
     a1.set_xlabel("neighbour probability $p$"); a1.set_ylabel(r"$\xi$")
     a1.legend(frameon=False)
     a1.set_title(rf"$p_c\approx{pc:.2f}$")
+    grid(a1)
 
     if fitted:
         t = np.array([(pc - fx).min(), (pc - fx).max()])
@@ -191,27 +255,80 @@ def plot_critical_scaling(rho=0.2, Ls=(64, 128, 256, 512), fitL=256,
     a2.set_xlabel(r"$p_c - p$"); a2.set_ylabel(r"$\xi$")
     a2.set_title(rf"$\nu\approx{nu:.2f}$" if fitted else "no fit: too few unsaturated points")
     a2.legend(frameon=False)
+    grid(a2)
     fig.tight_layout()
     fig.savefig(os.path.join(PLOTS, "criticalScaling", f"criticalScaling_rho_{g(rho)}.png"), dpi=300)
     plt.close(fig)
 
 
-def plot_histograms(L=128, rhos=(0.2, 0.4, 0.6, 0.8), ps=(0.0, 0.5, 1.0)):
+def plot_histograms(L=128, rhos=(0.2, 0.4, 0.6, 0.8), ps=(0.0, 0.5, 1.0), offset=12):
     colors = plt.cm.viridis(np.linspace(0, 0.85, len(rhos)))
     for p in ps:
         fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
-        for rho, col in zip(rhos, colors):
-            x, y = logbin(*load_hist("spotSize", L, rho, p))
-            a1.plot(x, y, "o", ms=5, color=col, label=rf"$\rho={g(rho)}$")
-            x, y = logbin(*load_hist("emission", L, rho, p))
-            a2.plot(x, y, "o", ms=5, color=col, label=rf"$\rho={g(rho)}$")
+        for a, kind in ((a1, "spotSize"), (a2, "emission")):
+            taus, amps, spans = [], [], []
+            for rho, col in zip(rhos, colors):
+                sizes, counts = load_hist(kind, L, rho, p)
+                tau = mle(sizes, counts)
+                x, y = logbin(sizes, counts)
+                a.plot(x, y, "o", ms=5, color=col, label=rf"$\rho={g(rho)}$, $\tau={tau:.2f}$")
+                f = (x >= XMIN) & (x <= sizes.max() / 20)
+                if tau > 0 and f.sum() > 2:
+                    taus.append(tau); amps.append(np.median(y[f] * x[f] ** tau))
+                    spans.append((x[f].min(), x[f].max()))
+            # one guideline for the whole panel, lifted clear of the data it describes
+            if taus:
+                tau = np.mean(taus)
+                xg = np.geomspace(min(s[0] for s in spans), max(s[1] for s in spans), 50)
+                a.plot(xg, offset * np.mean(amps) * xg ** -tau, "k--", lw=2,
+                       label=rf"$\tau={tau:.2f}$")
         for a, xl, yl in [(a1, "spot size $m$", "$n(m)$"), (a2, "emission size $s$", "$P(s)$")]:
             a.set_xscale("log"); a.set_yscale("log"); a.set_xlabel(xl); a.set_ylabel(yl)
-            a.legend(frameon=False)
+            a.legend(frameon=False); grid(a)
         fig.suptitle(f"$p={g(p)}$", fontsize=20)
         fig.tight_layout()
         fig.savefig(os.path.join(PLOTS, "histograms", f"histograms_L_{g(L)}_p_{g(p)}.png"), dpi=300)
         plt.close(fig)
+
+
+def plot_exponents_vs_p(L=128, rho=0.2, pc=0.6,
+                        ps=(0.0, 0.1, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.525, 0.55,
+                            0.575, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0)):
+    # the cascade exponent and the segregation order parameter share one x axis:
+    # tau slides smoothly across the whole range, m switches on at p_c
+    xs, te, ts, ms = [], [], [], []
+    for p in ps:
+        try:
+            e = mle(*load_hist("emission", L, rho, p))
+            s = mle(*load_hist("spotSize", L, rho, p))
+            m = segregation(load_snaps(L, rho, p))
+        except OSError:
+            continue
+        xs.append(p); te.append(e); ts.append(s); ms.append(m)
+
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    ax.axvline(pc, color="grey", ls=":", lw=2)
+    ax.text(pc - 0.015, 3.35, rf"$p_c\approx{g(pc)}$", color="grey", ha="right", fontsize=17)
+    # mean-field windows: tau_m in [3/2, 2] as q runs 1 -> 1/2, and tau_s = 2 tau_m - 1
+    ax.axhspan(1.5, 2.0, color="#ef8a62", alpha=0.15, lw=0)
+    ax.axhspan(2.0, 3.0, color="#b2182b", alpha=0.10, lw=0)
+    ax.plot(xs, te, "o-", color="#b2182b", ms=8, lw=2.5, label=r"emission $\tau_s$")
+    ax.plot(xs, ts, "^-", color="#ef8a62", ms=8, lw=2.5, label=r"spot $\tau_m$")
+    ax.set_xlabel("neighbour probability $p$")
+    ax.set_ylabel(r"power-law exponent $\tau$", color="#b2182b")
+    ax.tick_params(axis="y", colors="#b2182b")
+    ax.set_ylim(1.3, 3.5)
+    ax.legend(frameon=False, loc="lower left")
+    grid(ax)
+
+    a2 = ax.twinx()
+    a2.plot(xs, ms, "s--", color="#2166ac", ms=8, lw=2.5)
+    a2.set_ylabel("segregation $m$", color="#2166ac")
+    a2.tick_params(axis="y", colors="#2166ac")
+    a2.set_ylim(-0.03, max(ms) * 1.15)
+    fig.tight_layout()
+    fig.savefig(os.path.join(PLOTS, "exponents", f"exponents_L_{g(L)}_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -219,3 +336,4 @@ if __name__ == "__main__":
     plot_correlation_length()
     plot_critical_scaling()
     plot_histograms()
+    plot_exponents_vs_p()
