@@ -129,15 +129,6 @@ def correlation(snaps):
     C = np.bincount(r.ravel(), num.ravel()) / np.bincount(r.ravel(), den.ravel())
     return C
 
-def xi(snaps):
-    # domain size = first zero crossing of the sign correlation, capped at L/2
-    L = snaps[0].shape[0]
-    lim = L // 2
-    C = correlation(snaps)
-    z = np.where(C[:lim] < 0)[0]
-    return z[0] if len(z) else lim
-
-
 def xi_exp(snaps, rmax=6):
     # Decay rate of |C(r)| fitted from r=1 over a short window fixed in lattice units.
     # Neutrality (sum_r C(r) = 0) makes the tail of C an artifact of the box: at fixed p
@@ -192,72 +183,6 @@ def plot_correlation_length(L=128, rhos=(0.2, 0.4, 0.6, 0.8),
     grid(ax)
     fig.tight_layout()
     fig.savefig(os.path.join(PLOTS, "correlationLength", f"correlationLength_L_{g(L)}.png"), dpi=300)
-    plt.close(fig)
-
-
-def plot_critical_scaling(rho=0.2, Ls=(64, 128, 256, 512), fitL=256,
-                          ps=(0.30, 0.36, 0.40, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48,
-                              0.49, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58,
-                              0.60, 0.61, 0.64, 0.67, 0.70, 0.80, 0.90, 1.00)):
-    data = {}
-    for L in Ls:
-        xs, ys = [], []
-        for p in ps:
-            try:
-                v = xi_exp(load_snaps(L, rho, p))
-            except OSError:
-                continue
-            if np.isfinite(v):
-                xs.append(p); ys.append(v)
-        data[L] = (np.array(xs), np.array(ys))
-
-    # xi ~ (p_c - p)^-nu: fit on the largest box, where xi has the most room to grow
-    fx, fy = data[fitL]
-    rise = fx >= fx[np.argmin(fy)]           # drop the flat disordered plateau
-    rise &= fy < fitL / 8                    # and points pinned near the box ceiling
-    fx, fy = fx[rise], fy[rise]
-    # a power law cannot be fitted through a saturating curve; refuse rather than rail
-    fitted = len(fx) >= 4
-    if fitted:
-        pcs, nus = np.arange(fx.max() + 0.005, 1.60, 0.002), np.arange(0.3, 3.0, 0.01)
-        best = (1e18, 0.0, 0.0)
-        for pc in pcs:
-            for nu in nus:
-                res = np.log(fy) + nu * np.log(pc - fx)
-                c = np.sum((res - res.mean()) ** 2)
-                if c < best[0]:
-                    best = (c, pc, nu)
-        _, pc, nu = best
-        amp = np.exp(np.mean(np.log(fy) + nu * np.log(pc - fx)))
-        if pc >= pcs[-1] or nu >= nus[-1]:   # railed: the data do not constrain the fit
-            fitted = False
-    if not fitted:
-        pc = data[fitL][0][np.argmax(data[fitL][1] > fitL / 8)]  # crossing as a rough p_c
-
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
-    colors = plt.cm.plasma(np.linspace(0, 0.8, len(Ls)))
-    for L, col in zip(Ls, colors):
-        x, y = data[L]
-        a1.plot(x, y, "o-", color=col, label=f"$L={L}$")
-        m = x < pc
-        a2.plot(pc - x[m], y[m], "o-", color=col, label=f"$L={L}$")
-    a1.axvline(pc, color="grey", ls=":", lw=1.5)
-    a1.set_yscale("log")
-    a1.set_xlabel("neighbour probability $p$"); a1.set_ylabel(r"$\xi$")
-    a1.legend(frameon=False)
-    a1.set_title(rf"$p_c\approx{pc:.2f}$")
-    grid(a1)
-
-    if fitted:
-        t = np.array([(pc - fx).min(), (pc - fx).max()])
-        a2.plot(t, amp * t ** -nu, "k--", lw=1.5, label=rf"$(p_c-p)^{{-{nu:.2f}}}$")
-    a2.set_xscale("log"); a2.set_yscale("log")
-    a2.set_xlabel(r"$p_c - p$"); a2.set_ylabel(r"$\xi$")
-    a2.set_title(rf"$\nu\approx{nu:.2f}$" if fitted else "no fit: too few unsaturated points")
-    a2.legend(frameon=False)
-    grid(a2)
-    fig.tight_layout()
-    fig.savefig(os.path.join(PLOTS, "criticalScaling", f"criticalScaling_rho_{g(rho)}.png"), dpi=300)
     plt.close(fig)
 
 
@@ -334,6 +259,5 @@ def plot_exponents_vs_p(L=128, rho=0.2, pc=0.6,
 if __name__ == "__main__":
     plot_snapshots()
     plot_correlation_length()
-    plot_critical_scaling()
     plot_histograms()
     plot_exponents_vs_p()

@@ -10,6 +10,8 @@ Neighbour addition leads to coarsening and phase separation at a critical `p`. T
 
 - `probabilisticNeighbour.cpp`, `run.sh` — the simulation and the parameter sweeps. Writes histograms and snapshots to `outputs/` (regenerable, not tracked).
 - `plots.py` — all figures, into `plots/`. `plot_exponents_vs_p` is the summary: the exponent slides smoothly with `p` while the segregation order parameter switches on at `p_c ≈ 0.6`.
-- `meanField.py` — numerical steady state of the mean-field rate equation, compared against the simulation at the measured same-sign fraction `q`.
-- `renormalization.md` — why the exponent varies continuously (a marginal cascade, a line of fixed points) while the spatial ordering has a single tuned critical point.
+- `wellMixed.cpp` — the same cascade on a complete graph (Takayasu with two signs and biased partner selection), with `q` imposed as a rule instead of emerging from correlations. This is the exact stochastic process behind the rate equation, so it separates fluctuation effects from spatial ones.
+- `meanField.py` — numerical steady state of the mean-field rate equation, the closed-form `tau_closed(q)`, and the three-way comparison against `wellMixed` and the 2D lattice.
+- `renormalization.md` — why the exponent varies continuously (a marginal cascade, a line of fixed points) while the spatial ordering has a single tuned critical point. The sub-leading balance picks the point on the line: `cos(pi tau) = (1-q)/q`, with no solution at all for `q < 1/2`. Written at tutorial pace, every step spelled out.
+- `renormalization_concise.md` — the same derivation at manuscript length, for dropping into the paper.
 - `tex/` — manuscript drafts. `main_revised.tex` is the current one; `main.tex` is the earlier version and its figures are missing.
