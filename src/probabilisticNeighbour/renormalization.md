@@ -580,29 +580,78 @@ usually stop at.
 
 ---
 
-## 5. Emissions inherit the exponent
+## 5. Emissions inherit the exponent — in mean field
 
-An emission is $s=\min(i,j)$ of a colliding pair. In mean field the pair is
-drawn $\propto n_i n_j$, so
+A spot of size $s$ has probability $P(s)\propto s^{-\tau_m}$, so a spot *larger*
+than $s$ has the cumulative probability
 
-$$
-P(s) \;\simeq\; 2 \cdot \underbrace{\frac{n_s}{N}}_{\Pr(i=s)}
-\cdot \underbrace{\frac{1}{N}\sum_{j\ge s} n_j}_{\Pr(j\ge s)} ,
-$$
+$$ P(k>s) \;\propto\; s^{1-\tau_m} . $$
 
-the factor $2$ for either partner being the smaller. For $\tau_m>1$ the tail sum
-is $\sum_{j\ge s} n_j \simeq \frac{A}{\tau_m-1} s^{1-\tau_m}$, so
+An emission is $s=\min(i,j)$ of a colliding pair. To emit more than $s$ you need
+**two** things bigger than $s$ to merge, and in mean field the pair is drawn
+$\propto n_i n_j$ — two independent draws — so the two probabilities multiply:
 
-$$
-P(s) \;\propto\; s^{-\tau_m}\cdot s^{1-\tau_m} = s^{-(2\tau_m-1)}
+$$ P(\text{emission}>s) \;\propto\; s^{1-\tau_m}\cdot s^{1-\tau_m}
+= s^{2-2\tau_m} . $$
+
+Differentiating back from cumulative to density,
+
+$$ P(s) \;\propto\; s^{1-2\tau_m}
 \qquad\Longrightarrow\qquad
-\boxed{\ \tau_s = 2\tau_m - 1\ } .
-$$
+\boxed{\ \tau_s = 2\tau_m - 1\ } . $$
 
-The two exponents are not independent: the spot distribution is primary. As
-$\tau_m$ runs $2\to\tfrac32$, $\tau_s$ runs $3\to2$. Combining with Section 4,
+Hence $\tau_s>\tau_m$ always — a large emission is doubly rare. The spot
+distribution is primary: as $\tau_m$ runs $2\to\tfrac32$, $\tau_s$ runs $3\to2$.
+Combining with Section 4,
 
 $$ \tau_s(q) = 3 - \frac{2}{\pi}\arccos\!\left(\frac{1-q}{q}\right) . $$
+
+### 5.1 Why it fails above $p_c$
+
+The only input was that the two partners are independent draws from $n(m)$. That
+survives the mixed phase and dies at the transition: at $L=128$, $\rho=0.2$, the
+measured $(\tau_s,\,2\tau_m-1)$ is $(2.60,2.51)$ at $p=0.3$ and $(2.18,2.18)$ at
+$p=0.55$, but $(1.79,1.95)$ at $p=1$.
+
+Dumping the mass pair of every annihilation (`collisionPairs.cpp`) shows which
+half of the assumption goes. It is not independence but the distribution itself:
+$n(m)$ counts each spot once per snapshot, whereas collisions count it once per
+*event*, and a condensate pinned at a domain interface eats one arrival after
+another. Its share of events is macroscopic and all at a single enormous mass, so
+the collision marginal is much fatter than $n(m)$ — $\tau\approx1.13$–$1.31$
+against $\tau_m\approx1.47$, at every $L$. Reweighting to that marginal shifts
+the predicted exponent by $-0.3$ to $-0.6$; partner correlation pushes back by
+$+0.1$ to $+0.3$.
+
+Conditioning confirms the mechanism: restricted to events whose larger partner
+exceeds $10^5$, $\min(i,j)$ is simply the arriving bulk spot, and the measured
+exponent is $\tau_m$ itself ($1.48$–$1.54$ over $L=128$–$512$). Emissions are
+thus a mixture of condensate collisions, carrying $\tau_m$, and ordinary bulk
+pairs, carrying $2\tau_m-1$ — and the mixture settles at neither end:
+
+| $L$ | 64 | 128 | 256 | 512 | 1024 |
+|---|---|---|---|---|---|
+| $\tau_m$ | 1.520 | 1.477 | 1.473 | 1.466 | 1.467 |
+| $\tau_s$ | 1.864 | 1.774 | 1.757 | 1.679 | 1.676 |
+
+$\tau_m$ is flat at $1.47$ — a clean plateau over five decades at $L=1024$, with
+the early and late halves of the recording window agreeing to $0.003$ —
+confirming Takayasu, the small residual below $3/2$ consistent with the
+logarithmic corrections expected at $d_c=2$. $\tau_s$ falls and then
+**saturates at $\approx1.68$**, strictly between $\tau_m$ and $2\tau_m-1$ and
+fixed by neither.
+
+*How* the mixture reaches that value is not resolved here. The condensate is a
+single macroscopic object, so the event-ensemble marginal and the condensate's
+share of the emitted flux are not self-averaging: single-seed estimates scatter
+by $\sim0.2$ in exponent and $\sim0.15$ in flux share, non-monotone in $L$.
+Settling that needs several seeds per size at the pair level. The saturation of
+$\tau_s$ itself is solid — three seeds per size, and flat to $0.003$ over a
+fourfold change in area.
+
+The practical consequence is that $\tau_s$ is not a derived quantity above
+$p_c$. Below the transition it is bound to $\tau_m$ by the identity; above it
+the two must be measured independently.
 
 ---
 

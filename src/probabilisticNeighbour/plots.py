@@ -30,12 +30,16 @@ def files(kind, L, rho, p):
     return fs
 
 def load_hist(kind, L, rho, p):
-    # sum histograms over seeds
+    # sum histograms over seeds; a run killed before it wrote leaves an empty file
     total = {}
     for f in files(kind, L, rho, p):
+        if os.path.getsize(f) < 20:
+            continue
         d = np.loadtxt(f, dtype=np.int64, ndmin=2)
         for s, c in d:
             total[s] = total.get(s, 0) + c
+    if not total:
+        raise OSError(f"all {kind} files empty for {tag(L, rho, p)}")
     sizes = np.array(sorted(total))
     return sizes.astype(float), np.array([total[s] for s in sizes], dtype=float)
 
@@ -256,7 +260,78 @@ def plot_exponents_vs_p(L=128, rho=0.2, pc=0.6,
     plt.close(fig)
 
 
+def window_slope(sizes, counts, lo, hi, nb=30):
+    # least-squares log-log slope over a window fixed in absolute flux units, so the
+    # same range of physical scales is fitted at every L
+    x, y = logbin(sizes, counts, nb)
+    m = (x >= lo) & (x <= hi)
+    if m.sum() < 3:
+        return np.nan
+    return -np.polyfit(np.log(x[m]), np.log(y[m]), 1)[0]
+
+
+# fit windows for the p=1 finite-size study, chosen to sit inside the plateau at every L
+SPOT_WIN, EMIS_WIN = (100, 3e4), (50, 3e3)
+
+
+def plot_finite_size(rho=0.2, p=1.0, Ls=(32, 48, 64, 96, 128, 256, 512, 1024)):
+    # At p=1 the spot exponent is L-independent at the Takayasu value, while the
+    # emission exponent drifts down with L, away from 2 tau_m - 1.
+    Ls = [L for L in Ls
+          if all(any(os.path.getsize(f) > 20
+                     for f in glob.glob(os.path.join(OUT, f"{k}_{tag(L, rho, p)}_seed_*.tsv")))
+                 for k in ("spotSize", "emission"))]
+    colors = plt.cm.viridis(np.linspace(0, 0.88, len(Ls)))
+
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
+    taus = {"spotSize": [], "emission": []}
+    for L, col in zip(Ls, colors):
+        for a, kind, win in ((a1, "spotSize", SPOT_WIN), (a2, "emission", EMIS_WIN)):
+            sizes, counts = load_hist(kind, L, rho, p)
+            t = window_slope(sizes, counts, *win)
+            taus[kind].append(t)
+            x, y = logbin(sizes, counts)
+            a.plot(x, y, "o-", ms=4, lw=1, color=col, label=rf"$L={L}$, $\tau={t:.2f}$")
+    xg = np.geomspace(*SPOT_WIN, 20)
+    a1.plot(xg, 0.4 * xg ** -1.5, "k--", lw=2.5, label=r"$m^{-3/2}$ (Takayasu)")
+    xg = np.geomspace(*EMIS_WIN, 20)
+    a2.plot(xg, 4.0 * xg ** -2.0, "k--", lw=2.5, label=r"$s^{-2}=s^{-(2\tau_m-1)}$")
+    a2.plot(xg, 0.35 * xg ** -1.5, "k:", lw=2.5, label=r"$s^{-3/2}=s^{-\tau_m}$")
+    for a, xl, yl in ((a1, "spot size $m$", "$n(m)$"), (a2, "emission size $s$", "$P(s)$")):
+        a.set_xscale("log"); a.set_yscale("log"); a.set_xlabel(xl); a.set_ylabel(yl)
+        a.legend(frameon=False, fontsize=13); grid(a)
+    fig.tight_layout()
+    fig.savefig(os.path.join(PLOTS, "finiteSize",
+                             f"finiteSize_rho_{g(rho)}_p_{g(p)}.png"), dpi=300)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(9, 6.5))
+    iL = 1.0 / np.array(Ls, dtype=float)
+    tm, ts = np.array(taus["spotSize"]), np.array(taus["emission"])
+    ax.axhline(1.5, color="grey", ls="--", lw=2)
+    ax.axhline(2.0, color="grey", ls=":", lw=2)
+    ax.text(0.0005, 1.52, r"$3/2$", color="grey", fontsize=17)
+    ax.text(0.0005, 2.02, r"$2\tau_m-1=2$", color="grey", fontsize=17)
+    ax.plot(iL, tm, "^-", color="#ef8a62", ms=9, lw=2.5, label=r"spot $\tau_m$")
+    ax.plot(iL, ts, "o-", color="#b2182b", ms=9, lw=2.5, label=r"emission $\tau_s$")
+    for a, y in ((iL, tm), (iL, ts)):  # 1/L extrapolation from the large-L points
+        f = a <= 1 / 64.
+        if f.sum() >= 3:
+            b, c = np.polyfit(a[f], y[f], 1)
+            xx = np.linspace(0, a[f].max(), 10)
+            ax.plot(xx, c + b * xx, "-", color="k", lw=1, alpha=0.5)
+            ax.plot([0], [c], "k*", ms=14)
+    ax.set_xlabel("$1/L$"); ax.set_ylabel(r"power-law exponent $\tau$")
+    ax.set_xlim(-0.001, 0.022); ax.set_ylim(1.35, 2.45)
+    ax.legend(frameon=False, loc="lower right"); grid(ax)
+    fig.tight_layout()
+    fig.savefig(os.path.join(PLOTS, "finiteSize",
+                             f"exponentsVsInvL_rho_{g(rho)}_p_{g(p)}.png"), dpi=300)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
+    plot_finite_size()
     plot_snapshots()
     plot_correlation_length()
     plot_histograms()

@@ -14,4 +14,5 @@ Neighbour addition leads to coarsening and phase separation at a critical `p`. T
 - `meanField.py` — numerical steady state of the mean-field rate equation, the closed-form `tau_closed(q)`, and the three-way comparison against `wellMixed` and the 2D lattice.
 - `renormalization.md` — why the exponent varies continuously (a marginal cascade, a line of fixed points) while the spatial ordering has a single tuned critical point. The sub-leading balance picks the point on the line: `cos(pi tau) = (1-q)/q`, with no solution at all for `q < 1/2`. Written at tutorial pace, every step spelled out.
 - `renormalization_concise.md` — the same derivation at manuscript length, for dropping into the paper.
+- `collisionPairs.cpp` — instrumented copy of the simulation that dumps the mass pair of every annihilation, used in Section 5.1 of `renormalization.md` to find which mean-field assumption `tau_s = 2 tau_m - 1` loses above `p_c`.
 - `tex/` — manuscript drafts. `main_revised.tex` is the current one; `main.tex` is the earlier version and its figures are missing.
