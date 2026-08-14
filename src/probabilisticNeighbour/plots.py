@@ -103,6 +103,44 @@ def segregation(snaps, b=None):
     m, m0 = np.mean(raw), np.mean(floor)
     return np.sqrt(max(m * m - m0 * m0, 0.0))
 
+def voronoi_edges(sign, seed=0):
+    # Periodic Voronoi (= Delaunay) neighbour pairs of the occupied sites of one
+    # snapshot. Points are tiled 3x3 so that neighbours wrap; an edge of the periodic
+    # graph then appears exactly twice among edges touching the central copy, which is a
+    # uniform factor and drops out of any ratio. Site centres are jittered because the
+    # Delaunay of a perfect lattice is degenerate (cocircular quadruples).
+    from scipy.spatial import Delaunay
+    L = sign.shape[0]
+    y, x = np.nonzero(sign)
+    n = len(x)
+    rng = np.random.default_rng(seed)
+    pts = np.column_stack([x, y]).astype(float) + 0.5 + rng.uniform(-1e-6, 1e-6, (n, 2))
+    shifts = np.array([[i * L, j * L] for i in (-1, 0, 1) for j in (-1, 0, 1)])
+    tiled = (pts[None, :, :] + shifts[:, None, :]).reshape(-1, 2)
+    base = np.tile(np.arange(n), len(shifts))
+    central = np.repeat(np.arange(len(shifts)), n) == 4   # shift (0,0)
+
+    tri = Delaunay(tiled)
+    s = tri.simplices
+    e = np.vstack([s[:, [0, 1]], s[:, [1, 2]], s[:, [2, 0]]])
+    keep = central[e[:, 0]] | central[e[:, 1]]
+    e = e[keep]
+    return sign[y, x], base[e[:, 0]], base[e[:, 1]]
+
+
+def voronoi_same_sign(snaps, nmax=4):
+    # Fraction of Voronoi-neighbour pairs sharing a sign. Unlike the lattice-neighbour
+    # version this is defined for a dilute surface: every spot has neighbours regardless
+    # of how many empty sites separate them.
+    same = tot = 0
+    for k, a in enumerate(snaps[-nmax:]):
+        sgn, i, j = voronoi_edges(np.sign(a).astype(np.int8), seed=k)
+        m = i != j                                        # a spot paired with its own image
+        pr = sgn[i[m]].astype(int) * sgn[j[m]].astype(int)
+        same += (pr > 0).sum(); tot += len(pr)
+    return same / tot
+
+
 def same_sign_frac(snaps):
     # q: fraction of occupied nearest-neighbour pairs that share a sign. A collision is
     # always between neighbours, so this is the branching ratio of the kinetic theory:
@@ -116,36 +154,10 @@ def same_sign_frac(snaps):
     return same / (same + opp)
 
 
-def correlation(snaps):
-    # conditional sign correlation over occupied pairs, averaged over snapshots
-    L = snaps[0].shape[0]
-    num = np.zeros((L, L))
-    den = np.zeros((L, L))
-    for a in snaps:
-        s = np.sign(a).astype(float)
-        o = (a != 0).astype(float)
-        num += np.fft.irfft2(np.abs(np.fft.rfft2(s)) ** 2, s=(L, L))
-        den += np.fft.irfft2(np.abs(np.fft.rfft2(o)) ** 2, s=(L, L))
-    num = np.fft.fftshift(num); den = np.fft.fftshift(den)
-    c = L // 2
-    yy, xx = np.indices((L, L))
-    r = np.round(np.sqrt((yy - c) ** 2 + (xx - c) ** 2)).astype(int)
-    C = np.bincount(r.ravel(), num.ravel()) / np.bincount(r.ravel(), den.ravel())
-    return C
-
-def xi_exp(snaps, rmax=6):
-    # Decay rate of |C(r)| fitted from r=1 over a short window fixed in lattice units.
-    # Neutrality (sum_r C(r) = 0) makes the tail of C an artifact of the box: at fixed p
-    # it grows with L, while r<~4 is L-independent. Only the short range is physical, so
-    # the window must not follow the tail (a self-consistent window chases it and gives
-    # xi proportional to L).
-    C = correlation(snaps)
-    r = np.arange(1, rmax + 1)
-    y = np.abs(C[1:rmax + 1])
-    if (y <= 0).any() or abs(C[2]) > abs(C[1]):
-        return np.nan
-    slope = np.polyfit(r, np.log(y), 1)[0]
-    return -1.0 / slope if slope < 0 else np.nan
+def available_ps(L, rho):
+    # every p that has snapshot data at this (L, rho)
+    return sorted({float(f.split("_p_")[1].split("_seed")[0])
+                   for f in glob.glob(os.path.join(OUT, f"snapshots_L_{g(L)}_rho_{g(rho)}_p_*.tsv"))})
 
 
 def plot_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
@@ -166,27 +178,65 @@ def plot_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
     plt.close(fig)
 
 
-def plot_correlation_length(L=128, rhos=(0.2, 0.4, 0.6, 0.8),
-                            ps=(0.0, 0.1, 0.2, 0.3, 0.35, 0.375, 0.4, 0.425, 0.45, 0.475,
-                                0.5, 0.525, 0.55, 0.575, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0)):
+def plot_voronoi_same_sign(L=128, rhos=(0.2, 0.6)):
     fig, ax = plt.subplots(figsize=(8, 6))
-    colors = plt.cm.viridis(np.linspace(0, 0.85, len(rhos)))
+    colors = plt.cm.viridis(np.linspace(0, 0.6, len(rhos)))
     for rho, col in zip(rhos, colors):
-        xs, ys = [], []
+        ps = available_ps(L, rho)
+        xs, ys, es = [], [], []
         for p in ps:
-            try:
-                v = xi_exp(load_snaps(L, rho, p))
-            except OSError:
-                continue
-            if np.isfinite(v):
-                xs.append(p); ys.append(v)
-        ax.plot(xs, ys, "o-", color=col, label=rf"$\rho={g(rho)}$")
+            vals = [voronoi_same_sign([s]) for s in load_snaps(L, rho, p)[-6:]]
+            xs.append(p); ys.append(np.mean(vals))
+            es.append(np.std(vals) / np.sqrt(len(vals)))
+        ax.errorbar(xs, ys, yerr=es, fmt="o-", color=col, ms=5, capsize=3,
+                    label=rf"$\rho={g(rho)}$")
+    ax.axhline(0.5, color="k", ls="--", lw=1)
     ax.set_xlabel("neighbour probability $p$")
-    ax.set_ylabel(r"correlation length $\xi$")
+    ax.set_ylabel(r"same-sign fraction $q_V$")
     ax.legend(frameon=False)
     grid(ax)
     fig.tight_layout()
-    fig.savefig(os.path.join(PLOTS, "correlationLength", f"correlationLength_L_{g(L)}.png"), dpi=300)
+    os.makedirs(os.path.join(PLOTS, "correlationLength"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "correlationLength",
+                             f"voronoiSameSign_L_{g(L)}.png"), dpi=300)
+    plt.close(fig)
+
+
+def plot_snapshots_voronoi(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
+    from scipy.spatial import Voronoi
+    from matplotlib.collections import PolyCollection
+    fig, axes = plt.subplots(len(rhos), len(ps), figsize=(3.3 * len(ps), 3.3 * len(rhos)))
+    for i, rho in enumerate(rhos):
+        for j, p in enumerate(ps):
+            ax = np.atleast_2d(axes)[i][j]
+            sign = np.sign(load_snaps(L, rho, p)[-1]).astype(np.int8)
+            y, x = np.nonzero(sign)
+            n = len(x)
+            rng = np.random.default_rng(0)
+            pts = np.column_stack([x, y]).astype(float) + 0.5 + rng.uniform(-1e-6, 1e-6, (n, 2))
+            shifts = np.array([[a * L, b * L] for a in (-1, 0, 1) for b in (-1, 0, 1)])
+            vor = Voronoi((pts[None] + shifts[:, None]).reshape(-1, 2))
+            # draw every tile and let the axes clip: cells of image points still cover
+            # part of the box, so drawing only the central copy leaves gaps at the edges
+            polys, cols = [], []
+            s = np.tile(sign[y, x], len(shifts))
+            for k in range(len(shifts) * n):
+                reg = vor.regions[vor.point_region[k]]
+                if reg and -1 not in reg:
+                    polys.append(vor.vertices[reg])
+                    cols.append("#b2182b" if s[k] > 0 else "#2166ac")
+            ax.add_collection(PolyCollection(polys, facecolors=cols, linewidths=0.15,
+                                             edgecolors="white"))
+            ax.set_xlim(0, L); ax.set_ylim(L, 0); ax.set_aspect("equal")
+            ax.set_xticks([]); ax.set_yticks([])
+            if i == 0:
+                ax.set_title(f"$p={g(p)}$")
+            if j == 0:
+                ax.set_ylabel(rf"$\rho={g(rho)}$")
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "snapshotsVoronoi"), exist_ok=True)
+    name = f"snapshotsVoronoi_L_{g(L)}_rho_{'_'.join(g(r) for r in rhos)}_p_{'_'.join(g(p) for p in ps)}.png"
+    fig.savefig(os.path.join(PLOTS, "snapshotsVoronoi", name), dpi=300)
     plt.close(fig)
 
 
@@ -220,41 +270,42 @@ def plot_histograms(L=128, rhos=(0.2, 0.4, 0.6, 0.8), ps=(0.0, 0.5, 1.0), offset
         plt.close(fig)
 
 
-def plot_exponents_vs_p(L=128, rho=0.2, pc=0.6,
-                        ps=(0.0, 0.1, 0.2, 0.3, 0.35, 0.4, 0.45, 0.5, 0.525, 0.55,
-                            0.575, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0)):
-    # the cascade exponent and the segregation order parameter share one x axis:
-    # tau slides smoothly across the whole range, m switches on at p_c
-    xs, te, ts, ms = [], [], [], []
-    for p in ps:
+def plot_exponents_vs_p(L=128, rho=0.2):
+    # both cascade exponents and the Voronoi same-sign fraction share one x axis:
+    # tau slides with p, while q_V says how ordered the surface is at that p
+    xs, te, ts, qs = [], [], [], []
+    for p in available_ps(L, rho):
         try:
             e = mle(*load_hist("emission", L, rho, p))
-            s = mle(*load_hist("spotSize", L, rho, p))
-            m = segregation(load_snaps(L, rho, p))
+            m = mle(*load_hist("spotSize", L, rho, p))
+            q = voronoi_same_sign(load_snaps(L, rho, p))
         except OSError:
             continue
-        xs.append(p); te.append(e); ts.append(s); ms.append(m)
+        xs.append(p); te.append(e); ts.append(m); qs.append(q)
 
     fig, ax = plt.subplots(figsize=(9, 6.5))
-    ax.axvline(pc, color="grey", ls=":", lw=2)
-    ax.text(pc - 0.015, 3.35, rf"$p_c\approx{g(pc)}$", color="grey", ha="right", fontsize=17)
     # mean-field windows: tau_m in [3/2, 2] as q runs 1 -> 1/2, and tau_s = 2 tau_m - 1
     ax.axhspan(1.5, 2.0, color="#ef8a62", alpha=0.15, lw=0)
     ax.axhspan(2.0, 3.0, color="#b2182b", alpha=0.10, lw=0)
     ax.plot(xs, te, "o-", color="#b2182b", ms=8, lw=2.5, label=r"emission $\tau_s$")
     ax.plot(xs, ts, "^-", color="#ef8a62", ms=8, lw=2.5, label=r"spot $\tau_m$")
+    # mean field predicts the emission cascade from the spot one: a spot of mass m emits
+    # s ~ m, so tau_s = 2 tau_m - 1. The gap to the measured tau_s is where that fails.
+    ax.plot(xs, 2 * np.array(ts) - 1, "--", color="k", lw=2,
+            label=r"$2\tau_m - 1$ (predicted $\tau_s$)")
     ax.set_xlabel("neighbour probability $p$")
     ax.set_ylabel(r"power-law exponent $\tau$", color="#b2182b")
     ax.tick_params(axis="y", colors="#b2182b")
     ax.set_ylim(1.3, 3.5)
-    ax.legend(frameon=False, loc="lower left")
+    ax.legend(frameon=False, loc="center left", bbox_to_anchor=(0.02, 0.42))
     grid(ax)
 
     a2 = ax.twinx()
-    a2.plot(xs, ms, "s--", color="#2166ac", ms=8, lw=2.5)
-    a2.set_ylabel("segregation $m$", color="#2166ac")
+    a2.plot(xs, qs, "s--", color="#2166ac", ms=8, lw=2.5)
+    a2.axhline(0.5, color="#2166ac", ls=":", lw=1.5, alpha=0.7)
+    a2.set_ylabel(r"same-sign fraction $q_V$", color="#2166ac")
     a2.tick_params(axis="y", colors="#2166ac")
-    a2.set_ylim(-0.03, max(ms) * 1.15)
+    a2.set_ylim(0.45, 1.02)
     fig.tight_layout()
     fig.savefig(os.path.join(PLOTS, "exponents", f"exponents_L_{g(L)}_rho_{g(rho)}.png"), dpi=300)
     plt.close(fig)
@@ -333,6 +384,7 @@ def plot_finite_size(rho=0.2, p=1.0, Ls=(32, 48, 64, 96, 128, 256, 512, 1024)):
 if __name__ == "__main__":
     plot_finite_size()
     plot_snapshots()
-    plot_correlation_length()
+    plot_snapshots_voronoi()
+    plot_voronoi_same_sign()
     plot_histograms()
     plot_exponents_vs_p()

@@ -98,17 +98,15 @@ void addNeighbourPair(std::vector<long long> &s, int L, std::vector<int> &f, std
     if (!negF) { int r; do { r = dl(gen); } while (s[r] != 0); s[r] = -1; addFilled(r, f, pos); }
 }
 
-// bipolar rule: place a +/- pair at a random empty site
-void addBipole(std::vector<long long> &s, int L, std::vector<int> &f, std::vector<int> &pos)
+// random rule: the + and the - land on two independent empty sites. The + is written
+// before the - is drawn, so the two cannot collide.
+void addRandomPair(std::vector<long long> &s, int L, std::vector<int> &f, std::vector<int> &pos)
 {
     std::uniform_int_distribution<> dl(0, L * L - 1);
-    int p; do { p = dl(gen); } while (s[p] != 0);
-    auto nb = neighbours(p, L);
-    std::shuffle(nb.begin(), nb.end(), gen);
-    int m = -1;
-    for (int c : nb) if (s[c] == 0) { m = c; break; }
-    if (m < 0) do { m = dl(gen); } while (s[m] != 0);
-    s[p] = 1; addFilled(p, f, pos); s[m] = -1; addFilled(m, f, pos);
+    int a; do { a = dl(gen); } while (s[a] != 0);
+    s[a] = 1; addFilled(a, f, pos);
+    int b; do { b = dl(gen); } while (s[b] != 0);
+    s[b] = -1; addFilled(b, f, pos);
 }
 
 void update(std::vector<long long> &s, int L, int N, double p, bool record, Hist &emis,
@@ -138,7 +136,7 @@ void update(std::vector<long long> &s, int L, int N, double p, bool record, Hist
     if ((int)f.size() < N)
     {
         if (dr(gen) < p) addNeighbourPair(s, L, f, pos);
-        else addBipole(s, L, f, pos);
+        else addRandomPair(s, L, f, pos);
     }
 }
 
