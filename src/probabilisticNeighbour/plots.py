@@ -160,6 +160,176 @@ def available_ps(L, rho):
                    for f in glob.glob(os.path.join(OUT, f"snapshots_L_{g(L)}_rho_{g(rho)}_p_*.tsv"))})
 
 
+def sign_correlation(snaps, nmax=8):
+    # C(r): sign correlation of occupied pairs separated by r, conditioned on both sites
+    # being occupied (the empty sites must not dilute it). Computed by FFT, radially
+    # averaged. This is the honest correlation function -- q_V is only its value at the
+    # nearest-neighbour distance, and converting that single number into a length
+    # requires an assumed form, which is what made the earlier xi estimate unreliable.
+    L = snaps[0].shape[0]
+    num = np.zeros((L, L)); den = np.zeros((L, L))
+    for a in snaps[-nmax:]:
+        s = np.sign(a).astype(float)
+        o = (a != 0).astype(float)
+        num += np.fft.irfft2(np.abs(np.fft.rfft2(s)) ** 2, s=(L, L))
+        den += np.fft.irfft2(np.abs(np.fft.rfft2(o)) ** 2, s=(L, L))
+    num = np.fft.fftshift(num); den = np.fft.fftshift(den)
+    c = L // 2
+    yy, xx = np.indices((L, L))
+    r = np.round(np.sqrt((yy - c) ** 2 + (xx - c) ** 2)).astype(int)
+    C = np.bincount(r.ravel(), num.ravel()) / np.bincount(r.ravel(), den.ravel())
+    return np.arange(len(C))[:c], C[:c]
+
+
+def plot_correlation_function(rho=0.2, Ls=(128, 256, 512), ps=(0.6, 0.8, 0.9, 1.0)):
+    # C(r) itself, one panel per p, all L overlaid. Read it as follows: if C(r) collapses
+    # onto one curve as L grows, the length is intrinsic and finite. If instead the curve
+    # keeps stretching with L, the length is set by the box -- which is what long-range
+    # order looks like. Nothing is fitted here; the L-dependence is the whole message.
+    # y is linear, not log: neutrality (sum_r C(r) = 0) forces C through zero at r ~ L/2,
+    # and on log axes that sign change looks like a sharp cutoff, which it is not.
+    # Top row vs r: collapse means an intrinsic, L-independent length.
+    # Bottom row vs r/L: collapse means the only length is the box.
+    fig, axes = plt.subplots(2, len(ps), figsize=(4.4 * len(ps), 8.5), sharey=True)
+    colors = plt.cm.viridis(np.linspace(0, 0.75, len(Ls)))
+    for j, p in enumerate(ps):
+        for L, col in zip(Ls, colors):
+            try:
+                r, C = sign_correlation(load_snaps(L, rho, p))
+            except OSError:
+                continue
+            m = r > 0
+            axes[0][j].plot(r[m], C[m], "-", lw=2, color=col, label=rf"$L={L}$")
+            axes[1][j].plot(r[m] / L, C[m], "-", lw=2, color=col, label=rf"$L={L}$")
+        for i, xl in ((0, "$r$"), (1, "$r/L$")):
+            a = axes[i][j]
+            a.set_xscale("log"); a.axhline(0, color="k", lw=1)
+            a.set_xlabel(xl); grid(a)
+        axes[0][j].set_title(f"$p={g(p)}$")
+        axes[0][j].legend(frameon=False, fontsize=13)
+    for i in (0, 1):
+        axes[i][0].set_ylabel("$C(r)$")
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "correlationLength"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "correlationLength",
+                             f"correlationFunction_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
+def plot_qv_finite_size(rho=0.2, Ls=(64, 128, 256, 512)):
+    # The crossing test. A genuine critical point shows up as curves for different L
+    # separating, and crossing at p_c. If the curves lie on top of each other all the way
+    # to p=1, the only singular point is p=1 and the rest is a crossover.
+    fig, ax = plt.subplots(figsize=(8.5, 6))
+    colors = plt.cm.viridis(np.linspace(0, 0.75, len(Ls)))
+    for L, col in zip(Ls, colors):
+        xs, ys, es = [], [], []
+        for p in available_ps(L, rho):
+            try:
+                snaps = load_snaps(L, rho, p)
+            except OSError:
+                continue
+            vals = [voronoi_same_sign([s]) for s in snaps[-6:]]
+            xs.append(p); ys.append(np.mean(vals))
+            es.append(np.std(vals) / np.sqrt(len(vals)))
+        if xs:
+            ax.errorbar(xs, ys, yerr=es, fmt="o-", ms=6, lw=2, capsize=3,
+                        color=col, label=rf"$L={L}$")
+    ax.axhline(0.5, color="k", ls="--", lw=1)
+    ax.set_xlabel("neighbour probability $p$")
+    ax.set_ylabel(r"same-sign fraction $q_V$")
+    ax.legend(frameon=False)
+    grid(ax)
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "correlationLength"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "correlationLength",
+                             f"qvFiniteSize_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
+def load_max(L, rho, p):
+    # largest-spot trajectories, one array per seed: step, maxAbs, sumAbs, nSpots
+    out = []
+    for f in files("maxSpot", L, rho, p):
+        if os.path.getsize(f) < 40:
+            continue
+        d = np.loadtxt(f, ndmin=2)
+        if len(d) > 1:
+            out.append(d)
+    if not out:
+        raise OSError(f"no maxSpot data for {tag(L, rho, p)}")
+    n = min(len(d) for d in out)
+    return np.stack([d[:n] for d in out])
+
+
+def plot_max_trajectories(L=128, rho=0.2, ps=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)):
+    # Takayasu-style condensation would show the largest spot growing without bound;
+    # annihilation may instead regulate it. Left: absolute mass of the largest spot.
+    # Right: its share of the total mass, which is the condensation order parameter.
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
+    colors = plt.cm.viridis(np.linspace(0, 0.85, len(ps)))
+    for p, col in zip(ps, colors):
+        try:
+            d = load_max(L, rho, p)
+        except OSError:
+            continue
+        t = d[0, :, 0]
+        ok = t > 0
+        # single seeds, not the seed average: the maximum grows and crashes, and
+        # averaging over seeds smooths exactly the feature that answers the question
+        a1.plot(t[ok], d[0, ok, 1], "-", lw=1.6, color=col, label=rf"$p={g(p)}$")
+        share = (d[:, :, 1] / d[:, :, 2]).mean(axis=0)
+        a2.plot(t[ok], share[ok], "-", lw=2, color=col, label=rf"$p={g(p)}$")
+    a1.set_xscale("log"); a1.set_yscale("log")
+    a1.set_xlabel("time $t$ (sweeps)"); a1.set_ylabel(r"largest spot $m_{\max}$")
+    a2.set_xscale("log")
+    a2.set_xlabel("time $t$ (sweeps)")
+    a2.set_ylabel(r"mass share $m_{\max}/\sum m$")
+    for a in (a1, a2):
+        a.legend(frameon=False, fontsize=13, ncol=2); grid(a)
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "largestSpot"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "largestSpot",
+                             f"maxTrajectories_L_{g(L)}_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
+def plot_max_finite_size(rho=0.2, Ls=(64, 128, 256, 512), ps=(0.0, 0.5, 1.0)):
+    # The decisive test. Steady-state maximum vs L: if the largest spot is regulated by
+    # annihilation it is L-independent; if it condenses it grows with the system, and
+    # m_max ~ L^2 (a finite share of all the mass) is the Takayasu-like case.
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
+    colors = plt.cm.viridis(np.linspace(0, 0.7, len(ps)))
+    for p, col in zip(ps, colors):
+        xs, ys, ss = [], [], []
+        for L in Ls:
+            try:
+                d = load_max(L, rho, p)
+            except OSError:
+                continue
+            half = d.shape[1] // 2          # steady state: second half of the run
+            xs.append(L)
+            ys.append(d[:, half:, 1].mean())
+            ss.append((d[:, half:, 1] / d[:, half:, 2]).mean())
+        if not xs:
+            continue
+        a1.plot(xs, ys, "o-", ms=9, lw=2.5, color=col, label=rf"$p={g(p)}$")
+        a2.plot(xs, ss, "o-", ms=9, lw=2.5, color=col, label=rf"$p={g(p)}$")
+    xg = np.array(Ls, dtype=float)
+    a1.plot(xg, xg ** 2 * 0.5, "k--", lw=2, label=r"$L^2$")
+    a1.set_xscale("log"); a1.set_yscale("log")
+    a1.set_xlabel("system size $L$"); a1.set_ylabel(r"steady-state $\langle m_{\max}\rangle$")
+    a2.set_xscale("log")
+    a2.set_xlabel("system size $L$"); a2.set_ylabel(r"mass share $m_{\max}/\sum m$")
+    a2.set_ylim(0, 1)
+    for a in (a1, a2):
+        a.legend(frameon=False, fontsize=14); grid(a)
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "largestSpot"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "largestSpot", f"maxVsL_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
 def plot_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
     cmap = ListedColormap(["#2166ac", "#f7f7f7", "#b2182b"])
     fig, axes = plt.subplots(len(rhos), len(ps), figsize=(3.3 * len(ps), 3.3 * len(rhos)))
@@ -384,7 +554,14 @@ def plot_finite_size(rho=0.2, p=1.0, Ls=(32, 48, 64, 96, 128, 256, 512, 1024)):
 if __name__ == "__main__":
     plot_finite_size()
     plot_snapshots()
+    plot_snapshots(ps=(0.4, 0.6, 0.8))
     plot_snapshots_voronoi()
+    plot_snapshots_voronoi(ps=(0.4, 0.6, 0.8))
+    plot_max_trajectories()
+    plot_max_trajectories(rho=0.6)
+    plot_max_finite_size()
     plot_voronoi_same_sign()
+    plot_qv_finite_size()
+    plot_correlation_function()
     plot_histograms()
     plot_exponents_vs_p()

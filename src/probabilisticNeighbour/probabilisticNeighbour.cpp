@@ -15,6 +15,7 @@ constexpr long long DEFAULT_STEPS = 100000;
 constexpr double DEFAULT_P = 1.0;
 constexpr int RECORD_INTERVAL = 100;
 constexpr int NUM_SNAPSHOTS = 40;
+constexpr int MAX_INTERVAL = 10;   // largest-spot sampling interval, in sweeps
 
 std::random_device rd;
 std::mt19937 gen(rd());
@@ -156,7 +157,8 @@ void writeSnapshot(std::ofstream &f, const std::vector<long long> &s, int L)
 }
 
 void run(int L, double rho, long long steps, double p,
-         std::ofstream &spotF, std::ofstream &emisF, std::ofstream &snapF)
+         std::ofstream &spotF, std::ofstream &emisF, std::ofstream &snapF,
+         std::ofstream &maxF)
 {
     int N = (int)((L * L * rho) / 2) * 2;
     std::vector<long long> s(L * L, 0);
@@ -171,10 +173,20 @@ void run(int L, double rho, long long steps, double p,
     Hist spot, emis;
     long long rec = steps / 2;
     long long snapEvery = std::max<long long>(1, (steps - rec) / NUM_SNAPSHOTS);
+    // largest-spot trajectory, recorded over the whole run (not just the second half):
+    // the question is whether the maximum keeps growing or saturates, so the transient
+    // matters. Scan the occupied list, not the lattice.
+    maxF << "# step\tmaxAbs\tsumAbs\tnSpots\n";
     for (long long step = 0; step < steps; ++step)
     {
         bool record = step >= rec;
         for (int i = 0; i < L * L; ++i) update(s, L, N, p, record, emis, f, pos);
+        if (step % MAX_INTERVAL == 0)
+        {
+            long long mx = 0, tot = 0;
+            for (int loc : f) { long long a = std::llabs(s[loc]); if (a > mx) mx = a; tot += a; }
+            maxF << step << "\t" << mx << "\t" << tot << "\t" << f.size() << "\n";
+        }
         if (record && step % RECORD_INTERVAL == 0)
             for (long long v : s) if (v) spot.add(std::llabs(v));
         if (record && (step - rec) % snapEvery == 0)
@@ -203,6 +215,7 @@ int main(int argc, char *argv[])
     std::ofstream spotF(outDir + "/spotSize_" + tag.str() + ".tsv");
     std::ofstream emisF(outDir + "/emission_" + tag.str() + ".tsv");
     std::ofstream snapF(outDir + "/snapshots_" + tag.str() + ".tsv");
-    run(L, rho, steps, p, spotF, emisF, snapF);
+    std::ofstream maxF(outDir + "/maxSpot_" + tag.str() + ".tsv");
+    run(L, rho, steps, p, spotF, emisF, snapF, maxF);
     return 0;
 }
