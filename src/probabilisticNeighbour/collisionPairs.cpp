@@ -96,16 +96,14 @@ void addNeighbourPair(std::vector<long long> &s, int L, std::vector<int> &f, std
     if (!negF) { int r; do { r = dl(gen); } while (s[r] != 0); s[r] = -1; addFilled(r, f, pos); }
 }
 
-void addBipole(std::vector<long long> &s, int L, std::vector<int> &f, std::vector<int> &pos)
+// random rule: the + and the - land on two independent empty sites
+void addRandomPair(std::vector<long long> &s, int L, std::vector<int> &f, std::vector<int> &pos)
 {
     std::uniform_int_distribution<> dl(0, L * L - 1);
-    int p; do { p = dl(gen); } while (s[p] != 0);
-    auto nb = neighbours(p, L);
-    std::shuffle(nb.begin(), nb.end(), gen);
-    int m = -1;
-    for (int c : nb) if (s[c] == 0) { m = c; break; }
-    if (m < 0) do { m = dl(gen); } while (s[m] != 0);
-    s[p] = 1; addFilled(p, f, pos); s[m] = -1; addFilled(m, f, pos);
+    int a; do { a = dl(gen); } while (s[a] != 0);
+    s[a] = 1; addFilled(a, f, pos);
+    int b; do { b = dl(gen); } while (s[b] != 0);
+    s[b] = -1; addFilled(b, f, pos);
 }
 
 long long pairSkip = 0, pairCtr = 0;
@@ -129,12 +127,12 @@ void update(std::vector<long long> &s, int L, int N, double p, bool record, Hist
     if (dv != 0)
     {
         if (record && val * dv < 0)
-        {
             emis.add(std::min(std::llabs(val), std::llabs(dv)));
-            // mover mass first, target mass second: the two are distinguishable
-            if (pairCtr++ % pairSkip == 0)
-                pairF << std::llabs(val) << "\t" << std::llabs(dv) << "\n";
-        }
+        // mover mass first, target mass second: the two are distinguishable.
+        // kind C = coagulation (same sign), A = annihilation (opposite sign)
+        if (record && pairCtr++ % pairSkip == 0)
+            pairF << std::llabs(val) << "\t" << std::llabs(dv) << "\t"
+                  << (val * dv > 0 ? 'C' : 'A') << "\n";
         if (val == -dv) removeLoc(dst, f, pos);
     }
     else addFilled(dst, f, pos);
@@ -143,7 +141,7 @@ void update(std::vector<long long> &s, int L, int N, double p, bool record, Hist
     if ((int)f.size() < N)
     {
         if (dr(gen) < p) addNeighbourPair(s, L, f, pos);
-        else addBipole(s, L, f, pos);
+        else addRandomPair(s, L, f, pos);
     }
 }
 
@@ -163,7 +161,7 @@ int main(int argc, char *argv[])
     std::ofstream hEarly(outDir + "/spotEarly_" + tag.str() + ".tsv");
     std::ofstream hLate(outDir + "/spotLate_" + tag.str() + ".tsv");
     std::ofstream emisF(outDir + "/emisDiag_" + tag.str() + ".tsv");
-    pairF << "# m_mover\tm_target\n";
+    pairF << "# m_mover\tm_target\tkind\n";
     tsF << "# step\tnspots\ttotal_abs_mass\tmax_mass\n";
 
     int N = (int)((L * L * rho) / 2) * 2;
