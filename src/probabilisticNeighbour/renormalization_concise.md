@@ -17,8 +17,9 @@ correlation $p$ enters the kinetics only through the branching ratio
 $$ q = \Pr(\text{a collision is same-sign}) , $$
 
 equal to $\tfrac12$ for an uncorrelated surface and $\to1$ when the signs
-segregate. In simulation $q$ runs from $0.39$ at $p=0$ — below $\tfrac12$, since
-bipolar injection anticorrelates the surface — to $0.95$ at $p=1$.
+segregate. In simulation $q$ runs from $0.50$ at $p=0$ — exactly the
+uncorrelated value, since injection there is at two independent random sites —
+to $0.95$ at $p=1$.
 
 ## Rate equation
 

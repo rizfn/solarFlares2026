@@ -60,7 +60,7 @@ def wm_tau(q, N=200000, kind="wmSpotSize"):
         for s, c in np.loadtxt(f, dtype=np.int64, ndmin=2):
             total[s] = total.get(s, 0) + c
     sizes = np.array(sorted(total), dtype=float)
-    return P.mle(sizes, np.array([total[s] for s in sizes], dtype=float))
+    return P.window_tau(sizes, np.array([total[s] for s in sizes], dtype=float))
 
 
 def measure(L=128, rho=0.2, ps=(0.0, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0), **kw):
@@ -71,7 +71,7 @@ def measure(L=128, rho=0.2, ps=(0.0, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0), **kw):
     for p in ps:
         try:
             q = P.same_sign_frac(P.load_snaps(L, rho, p))
-            ts = P.mle(*P.load_hist("spotSize", L, rho, p))
+            ts = P.window_tau(*P.load_hist("spotSize", L, rho, p))
         except OSError:
             continue
         tmf = fit_tau(mf_steady(q, **kw))
@@ -120,7 +120,7 @@ def plot_well_mixed(L=128, rho=0.2, N=200000,
     # the 2D lattice. The first two share every assumption except fluctuations; the
     # third additionally has space, so the gap between them is spatial correlation.
     p2, q2, tm2, tmf2 = measure(L, rho).T
-    ts2 = np.array([P.mle(*P.load_hist("emission", L, rho, p)) for p in p2])
+    ts2 = np.array([P.window_tau(*P.load_hist("emission", L, rho, p)) for p in p2])
 
     wq, wm, we = [], [], []
     for q in qs:

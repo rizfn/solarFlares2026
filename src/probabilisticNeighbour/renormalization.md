@@ -47,10 +47,10 @@ $$
 
 Segregated surface (large $p$) gives $q\to1$: with big domains almost every
 collision happens inside a domain, between like signs. An uncorrelated surface
-would give $q=\tfrac12$. The measured value runs monotonically from $q=0.39$ at
-$p=0$ to $q=0.95$ at $p=1$ — note that it starts *below* $\tfrac12$, because
-bipolar injection drops a $+$ and a $-$ right next to each other and so leaves
-the surface slightly **anti**-correlated rather than merely random.
+would give $q=\tfrac12$. The measured value runs monotonically from $q=0.50$ at
+$p=0$ to $q=0.95$ at $p=1$ — at $p=0$ the two injected spots land on independent
+random sites, so the surface is genuinely uncorrelated and the sweep starts
+exactly at $\tfrac12$ and never enters $q<\tfrac12$.
 
 ---
 
@@ -661,7 +661,7 @@ Now throw away the masses and keep only $\sigma_i = \mathrm{sign}(s_i) \in
 \{+,-,0\}$. This field has a $\mathbb{Z}_2$ symmetry ($+\leftrightarrow-$) and
 an order parameter — the coarse-grained magnetization $m$ — that is zero when
 mixed and nonzero when segregated. Neighbour injection and same-sign
-coalescence align neighbours; bipolar injection and diffusion scramble them. So
+coalescence align neighbours; random injection and diffusion scramble them. So
 coarse-grained, the sign field is an Ising-like system with some effective
 coupling $K(p)$ that grows with $p$.
 

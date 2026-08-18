@@ -1,5 +1,6 @@
 import os
 import glob
+import gzip
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
@@ -11,7 +12,7 @@ PLOTS = os.path.join(DIR, "plots")
 plt.rcParams.update({"font.size": 18, "axes.labelsize": 22, "xtick.labelsize": 16,
                      "ytick.labelsize": 16, "legend.fontsize": 15})
 
-XMIN = 10   # lower cutoff of the power-law fits, in flux units
+WIN_LO, WIN_FTOP = 60.0, 3e-4   # scaling-window fit: [lo, the mass above which a fraction ftop lies]
 
 def g(v):
     return f"{v:g}"
@@ -23,8 +24,13 @@ def grid(ax):
 def tag(L, rho, p):
     return f"L_{g(L)}_rho_{g(rho)}_p_{g(p)}"
 
+def opentext(path):
+    return gzip.open(path, "rt") if path.endswith(".gz") else open(path)
+
+
 def files(kind, L, rho, p):
-    fs = sorted(glob.glob(os.path.join(OUT, f"{kind}_{tag(L, rho, p)}_seed_*.tsv")))
+    fs = sorted(glob.glob(os.path.join(OUT, f"{kind}_{tag(L, rho, p)}_seed_*.tsv"))
+                + glob.glob(os.path.join(OUT, f"{kind}_{tag(L, rho, p)}_seed_*.tsv.gz")))
     if not fs:
         raise OSError(f"no files for {kind} {tag(L, rho, p)}")
     return fs
@@ -35,7 +41,7 @@ def load_hist(kind, L, rho, p):
     for f in files(kind, L, rho, p):
         if os.path.getsize(f) < 20:
             continue
-        d = np.loadtxt(f, dtype=np.int64, ndmin=2)
+        d = np.loadtxt(f, dtype=np.int64, ndmin=2)    # numpy reads .gz transparently
         for s, c in d:
             total[s] = total.get(s, 0) + c
     if not total:
@@ -59,7 +65,7 @@ def load_snaps(L, rho, p):
     snaps = []
     for path in files("snapshots", L, rho, p):
         rows = []
-        with open(path) as fh:
+        with opentext(path) as fh:
             for line in fh:
                 f = line.split()
                 if len(f) == L:
@@ -72,14 +78,31 @@ def load_snaps(L, rho, p):
     return snaps
 
 
-def mle(sizes, counts, xmin=XMIN):
-    # Hill estimator for a discrete power law above xmin (the -1/2 is the continuity
-    # correction; without it tau is biased high when xmin is small)
-    m = sizes >= xmin
-    s, c = sizes[m], counts[m]
-    if c.sum() < 100:
+def window_tau(sizes, counts, lo=WIN_LO, ftop=WIN_FTOP, perdec=6, minc=20):
+    # Log-log slope of the binned density over the scaling window.
+    #
+    # Not a Hill estimator: that averages everything above xmin, so it is biased up by
+    # both the pre-asymptotic small-m region and the cutoff, and the bias survives any
+    # amount of statistics (checked in plot_tauVsQ.py against cos(pi tau) = (1-q)/q).
+    #
+    # The upper edge is a quantile of the distribution, not the largest mass observed:
+    # sizes.max() is a single extreme value that jumps around between parameter points,
+    # and letting it set the window made tau(p) visibly jagged. Bins below minc counts
+    # are dropped and the fit is weighted by counts, since var(log y) ~ 1/counts.
+    # Tuned on the well-mixed data where the exponent is known: this leaves a residual
+    # bias of 0.002 against the closed form.
+    tot = counts.sum()
+    cc = np.cumsum(counts[::-1])[::-1] / tot          # P(M >= m)
+    hi = max(float(sizes[cc >= ftop].max()), 10 * lo)
+    nb = max(5, int(round(perdec * np.log10(hi / lo))) + 1)
+    edges = np.geomspace(lo, hi, nb)
+    h, _ = np.histogram(sizes, bins=edges, weights=counts)
+    x = np.sqrt(edges[:-1] * edges[1:])
+    y = h / np.diff(edges)
+    m = h >= minc
+    if m.sum() < 4:
         return np.nan
-    return 1 + c.sum() / np.sum(c * np.log(s / (xmin - 0.5)))
+    return -np.polyfit(np.log(x[m]), np.log(y[m]), 1, w=np.sqrt(h[m]))[0]
 
 
 def segregation(snaps, b=None):
@@ -157,7 +180,8 @@ def same_sign_frac(snaps):
 def available_ps(L, rho):
     # every p that has snapshot data at this (L, rho)
     return sorted({float(f.split("_p_")[1].split("_seed")[0])
-                   for f in glob.glob(os.path.join(OUT, f"snapshots_L_{g(L)}_rho_{g(rho)}_p_*.tsv"))})
+                   for f in glob.glob(os.path.join(OUT, f"snapshots_L_{g(L)}_rho_{g(rho)}_p_*.tsv"))
+                   + glob.glob(os.path.join(OUT, f"snapshots_L_{g(L)}_rho_{g(rho)}_p_*.tsv.gz"))})
 
 
 def sign_correlation(snaps, nmax=8):
@@ -418,10 +442,10 @@ def plot_histograms(L=128, rhos=(0.2, 0.4, 0.6, 0.8), ps=(0.0, 0.5, 1.0), offset
             taus, amps, spans = [], [], []
             for rho, col in zip(rhos, colors):
                 sizes, counts = load_hist(kind, L, rho, p)
-                tau = mle(sizes, counts)
+                tau = window_tau(sizes, counts)
                 x, y = logbin(sizes, counts)
                 a.plot(x, y, "o", ms=5, color=col, label=rf"$\rho={g(rho)}$, $\tau={tau:.2f}$")
-                f = (x >= XMIN) & (x <= sizes.max() / 20)
+                f = (x >= WIN_LO) & (x <= sizes.max() / 20)
                 if tau > 0 and f.sum() > 2:
                     taus.append(tau); amps.append(np.median(y[f] * x[f] ** tau))
                     spans.append((x[f].min(), x[f].max()))
@@ -446,8 +470,8 @@ def plot_exponents_vs_p(L=128, rho=0.2):
     xs, te, ts, qs = [], [], [], []
     for p in available_ps(L, rho):
         try:
-            e = mle(*load_hist("emission", L, rho, p))
-            m = mle(*load_hist("spotSize", L, rho, p))
+            e = window_tau(*load_hist("emission", L, rho, p))
+            m = window_tau(*load_hist("spotSize", L, rho, p))
             q = voronoi_same_sign(load_snaps(L, rho, p))
         except OSError:
             continue
