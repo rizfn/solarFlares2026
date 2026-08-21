@@ -78,7 +78,7 @@ def load_snaps(L, rho, p):
     return snaps
 
 
-def window_tau(sizes, counts, lo=WIN_LO, ftop=WIN_FTOP, perdec=6, minc=20):
+def window_fit(sizes, counts, lo=WIN_LO, ftop=WIN_FTOP, perdec=6, minc=20):
     # Log-log slope of the binned density over the scaling window.
     #
     # Not a Hill estimator: that averages everything above xmin, so it is biased up by
@@ -101,8 +101,18 @@ def window_tau(sizes, counts, lo=WIN_LO, ftop=WIN_FTOP, perdec=6, minc=20):
     y = h / np.diff(edges)
     m = h >= minc
     if m.sum() < 4:
-        return np.nan
-    return -np.polyfit(np.log(x[m]), np.log(y[m]), 1, w=np.sqrt(h[m]))[0]
+        return np.nan, np.nan
+    X, Y, W = np.log(x[m]), np.log(y[m]), np.sqrt(h[m])
+    co = np.polyfit(X, Y, 1, w=W)
+    res = Y - np.polyval(co, X)
+    return -co[0], float(np.sqrt(np.average(res ** 2, weights=W)))
+
+
+CURVED = 0.05   # residual above this means the window holds no straight line to fit
+
+
+def window_tau(sizes, counts, **kw):
+    return window_fit(sizes, counts, **kw)[0]
 
 
 def segregation(snaps, b=None):
@@ -184,6 +194,17 @@ def available_ps(L, rho):
                    + glob.glob(os.path.join(OUT, f"snapshots_L_{g(L)}_rho_{g(rho)}_p_*.tsv.gz"))})
 
 
+def sample_snaps(snaps, L):
+    # spread the sample evenly over seeds and time rather than taking the tail, which
+    # with many seeds would all come from one run. Fewer at large L: the Voronoi costs
+    # ~5 s per snapshot at L=512 and ~20 s at L=1024.
+    n = 16 if L <= 256 else (8 if L <= 512 else 6)
+    if len(snaps) <= n:
+        return snaps
+    idx = np.linspace(0, len(snaps) - 1, n).round().astype(int)
+    return [snaps[i] for i in idx]
+
+
 def sign_correlation(snaps, nmax=8):
     # C(r): sign correlation of occupied pairs separated by r, conditioned on both sites
     # being occupied (the empty sites must not dilute it). Computed by FFT, radially
@@ -253,7 +274,7 @@ def plot_qv_finite_size(rho=0.2, Ls=(64, 128, 256, 512)):
                 snaps = load_snaps(L, rho, p)
             except OSError:
                 continue
-            vals = [voronoi_same_sign([s]) for s in snaps[-6:]]
+            vals = [voronoi_same_sign([s]) for s in sample_snaps(snaps, L)]
             xs.append(p); ys.append(np.mean(vals))
             es.append(np.std(vals) / np.sqrt(len(vals)))
         if xs:
@@ -318,6 +339,170 @@ def plot_max_trajectories(L=128, rho=0.2, ps=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)):
     plt.close(fig)
 
 
+def equilibrated(d, tol=1.05):
+    # the largest spot is still growing if the last tenth of the run sits well above the
+    # tenth before it. Coarsening takes ~L^2 sweeps, so big boxes fail this at fixed steps.
+    n = d.shape[1] // 10
+    return d[:, -n:, 1].mean() / d[:, -2 * n:-n, 1].mean() < tol
+
+
+def plateau_fit(sizes, counts, perdec=8, minc=100, mindec=1.2, tol=0.03, prefer="wide"):
+    """Find a genuine scaling window instead of assuming one.
+
+    Every log-log window at least `mindec` decades wide is fitted; those straight to
+    within `tol` (weighted residual in log units) are candidates. `prefer` picks among
+    them: "wide" takes the widest, "small"/"large" take the lowest/highest-lying one,
+    which at intermediate p are two different regimes of the same distribution.
+
+    Checked against cos(pi tau) = (1-q)/q on the well-mixed data: recovers the closed
+    form to +-0.001 for q >= 0.7 and +0.017 at q = 0.6.
+    """
+    top = sizes.max() + 1
+    edges = np.geomspace(1, top, int(perdec * np.log10(top)) + 2)
+    h, _ = np.histogram(sizes, bins=edges, weights=counts)
+    x = np.sqrt(edges[:-1] * edges[1:])
+    y = h / np.diff(edges)
+    k = h >= minc
+    x, w = x[k], h[k]
+    if len(x) < 4:
+        return np.nan, np.nan, (np.nan, np.nan)
+    X, Y, W = np.log(x), np.log(y[k]), np.sqrt(w)
+    best = None
+    for i in range(len(x) - 3):
+        for j in range(i + 3, len(x)):
+            span = (X[j] - X[i]) / np.log(10)
+            if span < mindec:
+                continue
+            co = np.polyfit(X[i:j + 1], Y[i:j + 1], 1, w=W[i:j + 1])
+            r = Y[i:j + 1] - np.polyval(co, X[i:j + 1])
+            resid = float(np.sqrt(np.average(r ** 2, weights=W[i:j + 1])))
+            if resid > tol:
+                continue
+            # reach the required end of the range first, then be as wide as possible
+            if prefer == "small":
+                score = (-round(X[i], 1), round(span, 2))
+            elif prefer == "large":
+                score = (round(X[j], 1), round(span, 2))
+            else:
+                score = (round(span, 2), X[j])
+            if best is None or score > best[0]:
+                best = (score, -co[0], resid, (x[i], x[j]))
+    if best is None:
+        return np.nan, np.nan, (np.nan, np.nan)
+    return best[1], best[2], best[3]
+
+
+def plot_exponent_regimes(kind="emission", L=512, rho=0.2):
+    # At intermediate p the distribution has two scaling regimes, so one number cannot
+    # describe it: a steep one inherited from the mixed surface at small sizes, and a
+    # shallow one at large sizes that matches the ordered limit. Both are plotted where
+    # both exist, together with the crossover scale that separates them.
+    ps, lo_t, hi_t, cross = [], [], [], []
+    for p in available_ps(L, rho):
+        try:
+            sizes, counts = load_hist(kind, L, rho, p)
+        except OSError:
+            continue
+        ts, _, ws = plateau_fit(sizes, counts, prefer="small")
+        tl, _, wl = plateau_fit(sizes, counts, prefer="large")
+        ps.append(p); lo_t.append(ts); hi_t.append(tl)
+        cross.append(np.sqrt(ws[1] * wl[0]) if np.isfinite(ws[1]) and wl[0] > ws[1] else np.nan)
+    ps = np.array(ps)
+
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(9, 9), sharex=True,
+                                 gridspec_kw={"height_ratios": [2, 1]})
+    a1.plot(ps, lo_t, "o-", color="#2166ac", ms=7, lw=2, label="small-size regime")
+    a1.plot(ps, hi_t, "s-", color="#b2182b", ms=7, lw=2, label="large-size regime")
+    a1.set_ylabel(r"exponent $\tau_s$" if kind == "emission" else r"exponent $\tau_m$")
+    a1.legend(frameon=False); grid(a1)
+    a1.set_title(f"$L={L}$, " + r"$\rho=" + g(rho) + "$", fontsize=15)
+    a2.plot(ps, cross, "o-", color="k", ms=7, lw=2)
+    a2.set_yscale("log")
+    a2.set_ylabel("crossover size")
+    a2.set_xlabel("neighbour probability $p$")
+    grid(a2)
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "exponents"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "exponents",
+                             f"regimes_{kind}_L_{g(L)}_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
+def plot_distribution_shape(kind="emission", L=512, rho=0.2, ps=(0.5, 0.65, 0.7, 0.75, 1.0),
+                            nb=36, minc=50):
+    # The distribution itself, and its local slope, over the whole measured range. At
+    # intermediate p the emission distribution has two scaling regimes rather than one,
+    # so a single exponent fitted across the crossover is meaningless -- which is what
+    # the "no straight window" flag in plot_exponents_vs_p is detecting.
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(9, 10), sharex=True,
+                                 gridspec_kw={"height_ratios": [2, 1]})
+    colors = plt.cm.viridis(np.linspace(0, 0.85, len(ps)))
+    for p, col in zip(ps, colors):
+        try:
+            sizes, counts = load_hist(kind, L, rho, p)
+        except OSError:
+            continue
+        edges = np.geomspace(1, sizes.max() + 1, nb)
+        h, _ = np.histogram(sizes, bins=edges, weights=counts)
+        x = np.sqrt(edges[:-1] * edges[1:])
+        y = h / np.diff(edges) / counts.sum()
+        m = h >= minc
+        a1.plot(x[m], y[m], "o-", ms=4, lw=1.5, color=col, label=rf"$p={g(p)}$")
+        sl = -np.diff(np.log(y[m])) / np.diff(np.log(x[m]))
+        a2.plot(np.sqrt(x[m][:-1] * x[m][1:]), sl, "o-", ms=4, lw=1.5, color=col)
+    lo = WIN_LO
+    for a in (a1, a2):
+        a.axvspan(lo, 10 * lo, color="grey", alpha=0.18, lw=0)
+        a.set_xscale("log"); grid(a)
+    a1.set_yscale("log")
+    a1.set_ylabel("$P(s)$" if kind == "emission" else "$n(m)$")
+    a1.legend(frameon=False, fontsize=14)
+    a1.set_title(f"$L={L}$, " + r"$\rho=" + g(rho) + "$   (shaded: the fitted window)",
+                 fontsize=15)
+    a2.set_ylabel("local slope")
+    a2.set_xlabel("emission size $s$" if kind == "emission" else "spot size $m$")
+    a2.set_ylim(1.4, 3.2)
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "histograms"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "histograms",
+                             f"shape_{kind}_L_{g(L)}_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
+def plot_max_collapse(rho=0.2, Ls=(128, 256, 512, 1024), ps=(0.5, 1.0), z=2.0, logcorr=True):
+    # Rescaling time collapses the approach to steady state, so the plateau of the
+    # collapsed curve is the L-independent steady-state share -- which a fixed-time
+    # comparison across L cannot see, because the large boxes have not got there yet.
+    # z=2 is the diffusive expectation (a walker explores the box in ~L^2 sweeps); the
+    # log factor is the 2D marginal correction of coalescence, and over L=128..1024 it
+    # is what an empirical fit reads as an effective z of ~2.2.
+    def scale(L):
+        return L ** z * (np.log(L) if logcorr else 1.0)
+
+    lab = rf"$t / (L^{{{z:g}}}\ln L)$" if logcorr else rf"$t / L^{{{z:g}}}$"
+    fig, axes = plt.subplots(1, len(ps), figsize=(6.5 * len(ps), 5.5), sharey=True)
+    colors = plt.cm.viridis(np.linspace(0, 0.8, len(Ls)))
+    for ax, p in zip(np.atleast_1d(axes), ps):
+        for L, col in zip(Ls, colors):
+            try:
+                d = load_max(L, rho, p)
+            except OSError:
+                continue
+            t = d[0, :, 0]
+            share = (d[:, :, 1] / d[:, :, 2]).mean(axis=0)
+            ok = t > 0
+            ax.plot(t[ok] / scale(L), share[ok], "-", lw=2, color=col, label=rf"$L={L}$")
+        ax.set_xscale("log")
+        ax.set_xlabel(lab)
+        ax.set_title(f"$p={g(p)}$")
+        ax.legend(frameon=False, fontsize=13); grid(ax)
+    np.atleast_1d(axes)[0].set_ylabel(r"mass share $m_{\max}/\sum m$")
+    fig.tight_layout()
+    os.makedirs(os.path.join(PLOTS, "largestSpot"), exist_ok=True)
+    fig.savefig(os.path.join(PLOTS, "largestSpot", f"maxCollapse_rho_{g(rho)}.png"), dpi=300)
+    plt.close(fig)
+
+
 def plot_max_finite_size(rho=0.2, Ls=(64, 128, 256, 512), ps=(0.0, 0.5, 1.0)):
     # The decisive test. Steady-state maximum vs L: if the largest spot is regulated by
     # annihilation it is L-independent; if it condenses it grows with the system, and
@@ -325,7 +510,7 @@ def plot_max_finite_size(rho=0.2, Ls=(64, 128, 256, 512), ps=(0.0, 0.5, 1.0)):
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
     colors = plt.cm.viridis(np.linspace(0, 0.7, len(ps)))
     for p, col in zip(ps, colors):
-        xs, ys, ss = [], [], []
+        xs, ys, ss, eq = [], [], [], []
         for L in Ls:
             try:
                 d = load_max(L, rho, p)
@@ -335,10 +520,15 @@ def plot_max_finite_size(rho=0.2, Ls=(64, 128, 256, 512), ps=(0.0, 0.5, 1.0)):
             xs.append(L)
             ys.append(d[:, half:, 1].mean())
             ss.append((d[:, half:, 1] / d[:, half:, 2]).mean())
+            eq.append(equilibrated(d))
         if not xs:
             continue
-        a1.plot(xs, ys, "o-", ms=9, lw=2.5, color=col, label=rf"$p={g(p)}$")
-        a2.plot(xs, ss, "o-", ms=9, lw=2.5, color=col, label=rf"$p={g(p)}$")
+        xs, ys, ss, eq = map(np.array, (xs, ys, ss, eq))
+        a1.plot(xs, ys, "-", lw=2.5, color=col, label=rf"$p={g(p)}$")
+        a2.plot(xs, ss, "-", lw=2.5, color=col, label=rf"$p={g(p)}$")
+        for a, v in ((a1, ys), (a2, ss)):
+            a.plot(xs[eq], v[eq], "o", ms=9, color=col)
+            a.plot(xs[~eq], v[~eq], "o", ms=9, mfc="white", mec=col, mew=2)
     xg = np.array(Ls, dtype=float)
     a1.plot(xg, xg ** 2 * 0.5, "k--", lw=2, label=r"$L^2$")
     a1.set_xscale("log"); a1.set_yscale("log")
@@ -346,6 +536,7 @@ def plot_max_finite_size(rho=0.2, Ls=(64, 128, 256, 512), ps=(0.0, 0.5, 1.0)):
     a2.set_xscale("log")
     a2.set_xlabel("system size $L$"); a2.set_ylabel(r"mass share $m_{\max}/\sum m$")
     a2.set_ylim(0, 1)
+    a1.plot([], [], "o", mfc="white", mec="grey", mew=2, ms=9, label="still growing")
     for a in (a1, a2):
         a.legend(frameon=False, fontsize=14); grid(a)
     fig.tight_layout()
@@ -359,7 +550,7 @@ def plot_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
     fig, axes = plt.subplots(len(rhos), len(ps), figsize=(3.3 * len(ps), 3.3 * len(rhos)))
     for i, rho in enumerate(rhos):
         for j, p in enumerate(ps):
-            ax = axes[i][j]
+            ax = np.atleast_2d(axes)[i][j]      # a single row/column comes back 1-D
             ax.imshow(load_snaps(L, rho, p)[-1], cmap=cmap, vmin=-1, vmax=1, interpolation="nearest")
             ax.set_xticks([]); ax.set_yticks([])
             if i == 0:
@@ -379,7 +570,7 @@ def plot_voronoi_same_sign(L=128, rhos=(0.2, 0.6)):
         ps = available_ps(L, rho)
         xs, ys, es = [], [], []
         for p in ps:
-            vals = [voronoi_same_sign([s]) for s in load_snaps(L, rho, p)[-6:]]
+            vals = [voronoi_same_sign([s]) for s in sample_snaps(load_snaps(L, rho, p), L)]
             xs.append(p); ys.append(np.mean(vals))
             es.append(np.std(vals) / np.sqrt(len(vals)))
         ax.errorbar(xs, ys, yerr=es, fmt="o-", color=col, ms=5, capsize=3,
@@ -467,22 +658,38 @@ def plot_histograms(L=128, rhos=(0.2, 0.4, 0.6, 0.8), ps=(0.0, 0.5, 1.0), offset
 def plot_exponents_vs_p(L=128, rho=0.2):
     # both cascade exponents and the Voronoi same-sign fraction share one x axis:
     # tau slides with p, while q_V says how ordered the surface is at that p
-    xs, te, ts, qs = [], [], [], []
+    xs, te, ts, qs, bad = [], [], [], [], []
     for p in available_ps(L, rho):
         try:
-            e = window_tau(*load_hist("emission", L, rho, p))
-            m = window_tau(*load_hist("spotSize", L, rho, p))
-            q = voronoi_same_sign(load_snaps(L, rho, p))
+            # the asymptotic (large-size) plateau: the exponent of the scale-free tail,
+            # found rather than assumed. At intermediate p a fixed window straddles the
+            # crossover between two regimes and measures neither.
+            # widest straight stretch, found rather than assumed: it avoids both the
+            # small-size crossover and the finite-size cutoff, either of which a fixed
+            # window can land on. "large" is not used here -- it chases the cutoff.
+            e, _, ew = plateau_fit(*load_hist("emission", L, rho, p))
+            m, _, mw = plateau_fit(*load_hist("spotSize", L, rho, p))
+            q = voronoi_same_sign(sample_snaps(load_snaps(L, rho, p), L))
         except OSError:
             continue
         xs.append(p); te.append(e); ts.append(m); qs.append(q)
+        span = min(np.log10(ew[1] / ew[0]), np.log10(mw[1] / mw[0]))
+        bad.append(not np.isfinite(span) or span < 1.5)   # too short to trust
 
     fig, ax = plt.subplots(figsize=(9, 6.5))
     # mean-field windows: tau_m in [3/2, 2] as q runs 1 -> 1/2, and tau_s = 2 tau_m - 1
     ax.axhspan(1.5, 2.0, color="#ef8a62", alpha=0.15, lw=0)
     ax.axhspan(2.0, 3.0, color="#b2182b", alpha=0.10, lw=0)
-    ax.plot(xs, te, "o-", color="#b2182b", ms=8, lw=2.5, label=r"emission $\tau_s$")
-    ax.plot(xs, ts, "^-", color="#ef8a62", ms=8, lw=2.5, label=r"spot $\tau_m$")
+    xs, te, ts = map(np.array, (xs, te, ts))
+    bad = np.array(bad, dtype=bool)
+    ax.plot(xs, te, "-", color="#b2182b", lw=2.5, label=r"emission $\tau_s$")
+    ax.plot(xs, ts, "-", color="#ef8a62", lw=2.5, label=r"spot $\tau_m$")
+    for v, mk, col in ((te, "o", "#b2182b"), (ts, "^", "#ef8a62")):
+        ax.plot(xs[~bad], v[~bad], mk, color=col, ms=8)
+        ax.plot(xs[bad], v[bad], mk, mfc="white", mec=col, mew=2, ms=8)
+    if bad.any():
+        ax.plot([], [], "s", mfc="white", mec="grey", mew=2, ms=8,
+                label="short window")
     # mean field predicts the emission cascade from the spot one: a spot of mass m emits
     # s ~ m, so tau_s = 2 tau_m - 1. The gap to the measured tau_s is where that fails.
     ax.plot(xs, 2 * np.array(ts) - 1, "--", color="k", lw=2,
@@ -522,10 +729,16 @@ SPOT_WIN, EMIS_WIN = (100, 3e4), (50, 3e3)
 def plot_finite_size(rho=0.2, p=1.0, Ls=(32, 48, 64, 96, 128, 256, 512, 1024)):
     # At p=1 the spot exponent is L-independent at the Takayasu value, while the
     # emission exponent drifts down with L, away from 2 tau_m - 1.
-    Ls = [L for L in Ls
-          if all(any(os.path.getsize(f) > 20
-                     for f in glob.glob(os.path.join(OUT, f"{k}_{tag(L, rho, p)}_seed_*.tsv")))
-                 for k in ("spotSize", "emission"))]
+    def have(L):
+        for k in ("spotSize", "emission"):
+            try:
+                if not any(os.path.getsize(f) > 20 for f in files(k, L, rho, p)):
+                    return False
+            except OSError:
+                return False
+        return True
+
+    Ls = [L for L in Ls if have(L)]
     colors = plt.cm.viridis(np.linspace(0, 0.88, len(Ls)))
 
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 6))
