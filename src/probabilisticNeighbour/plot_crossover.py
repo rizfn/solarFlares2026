@@ -91,51 +91,52 @@ def crossover_scale(x, r):
     return np.nan if j in (0, len(r) - 1) else x[j]
 
 
-# ---------------------------------------------------------------- interface geometry
+# --------------------------------------------------------------- what sets the size
 
-def wall_points(sign, seed=0):
-    """Midpoints of the Voronoi bonds joining opposite-sign spots: the domain wall
-    as a point set. Defined by the neighbour graph, not by lattice occupancy, so it
-    does not thin out at low density -- counting boxes that merely *contain* both
-    signs instead measures sparsity at small eps and returns negative dimensions."""
-    from scipy.spatial import Delaunay
-    L = sign.shape[0]
-    y, x = np.nonzero(sign)
-    n = len(x)
-    rng = np.random.default_rng(seed)
-    pts = np.column_stack([x, y]).astype(float) + 0.5 + rng.uniform(-1e-6, 1e-6, (n, 2))
-    shifts = np.array([[i * L, j * L] for i in (-1, 0, 1) for j in (-1, 0, 1)])
-    tiled = (pts[None, :, :] + shifts[:, None, :]).reshape(-1, 2)
-    base = np.tile(np.arange(n), len(shifts))
-    central = np.repeat(np.arange(len(shifts)), n) == 4
-    tri = Delaunay(tiled)
-    s = tri.simplices
-    e = np.vstack([s[:, [0, 1]], s[:, [1, 2]], s[:, [2, 0]]])
-    e = e[central[e[:, 0]] | central[e[:, 1]]]
-    sg = sign[y, x]
-    opp = sg[base[e[:, 0]]] * sg[base[e[:, 1]]] < 0
-    return np.mod(0.5 * (tiled[e[opp, 0]] + tiled[e[opp, 1]]), L)
+def age_profile(L, rho, p, seeds=range(1, 9)):
+    """Mean age and distance walked by the emitting spot, against the size it emits.
+    Pooled over seeds; bins are the fixed log grid written by emissionAge.cpp."""
+    acc = {}
+    for s in seeds:
+        fn = os.path.join(OUT, "chAge_%s_seed_%d.tsv" % (tag(L, rho, p), s))
+        if not os.path.exists(fn) or os.path.getsize(fn) < 20:
+            continue
+        d = np.loadtxt(fn)
+        if d.ndim == 1:
+            d = d[None, :]
+        for size, n, age, disp, _rms in d:
+            k = round(np.log10(size), 4)
+            acc.setdefault(k, np.zeros(3))
+            acc[k] += [n, n * age, n * disp]
+    ks = np.array(sorted(acc))
+    v = np.array([acc[k] for k in ks])
+    keep = v[:, 0] > 500
+    return 10 ** ks[keep], v[keep, 1] / v[keep, 0], v[keep, 2] / v[keep, 0]
 
 
-def box_dimension(snaps, L):
-    es = np.array([e for e in (1, 2, 4, 8, 16, 32, 64, 128) if e <= L // 8])
-    walls = [wall_points(s) for s in snaps]        # one Delaunay per snapshot
-    N = []
-    for e in es:
-        N.append(np.mean([len(np.unique((w[:, 0] // e).astype(np.int64) * (L // e + 1)
-                                        + (w[:, 1] // e).astype(np.int64))) for w in walls]))
-    N = np.array(N)
-    k = N > 4
-    return es[k], -np.gradient(np.log(N[k]), np.log(es[k]))
-
-
-def xi_from_dimension(es, d, thresh=1.5):
-    # the length where the reactive set stops looking 1D and starts looking 2D
-    for i in range(len(d) - 1):
-        if d[i] < thresh <= d[i + 1]:
-            f = (thresh - d[i]) / (d[i + 1] - d[i])
-            return float(np.exp(np.log(es[i]) + f * (np.log(es[i + 1]) - np.log(es[i]))))
-    return np.nan
+def origin_fraction(L, rho, p, seeds=range(1, 9), perdec=3):
+    """Share of emissions of size s produced by a spot that was injected at a random
+    site rather than beside its own sign."""
+    def acc(kind):
+        a = {}
+        for s in seeds:
+            fn = os.path.join(OUT, "%s_%s_seed_%d.tsv" % (kind, tag(L, rho, p), s))
+            if not os.path.exists(fn) or os.path.getsize(fn) < 20:
+                continue
+            d = np.loadtxt(fn)
+            if d.ndim == 1:
+                d = d[None, :]
+            for k, v in d:
+                a[k] = a.get(k, 0.0) + v
+        return a
+    ao, ar = acc("chEmisOwn"), acc("chEmisRand")
+    ks = np.array(sorted(set(ao) | set(ar)))
+    e = np.geomspace(1, ks.max() + 1, int(perdec * np.log10(ks.max())) + 2)
+    ho, _ = np.histogram(ks, e, weights=np.array([ao.get(k, 0.0) for k in ks]))
+    hr, _ = np.histogram(ks, e, weights=np.array([ar.get(k, 0.0) for k in ks]))
+    tot = ho + hr
+    k = tot > 2000
+    return np.sqrt(e[:-1] * e[1:])[k], (hr / np.maximum(tot, 1))[k]
 
 
 # ------------------------------------------------------- mass vs distance to a wall
@@ -233,23 +234,25 @@ def figure(L=512, rho=0.2, Ls=(256, 512, 1024)):
     b.set(xscale="log", yscale="log", xlabel="$s$", ylabel="$1-q(s)$")
     b.legend(frameon=False, fontsize=13)
 
-    # (c) dimension of the reactive set, and its independence of L
-    mk = {256: "^", 512: "o", 1024: "s"}
-    for p in (0.0, 0.6, 0.7, 0.8, 0.9, 1.0):
+    # (c) what actually sets the emitted size: how long the spot lived and how far it
+    # walked before it met an opposite sign. Small emissions are spots that die where
+    # they were born; large ones have walked, and eaten, for a thousand times longer.
+    c2 = c.twinx()
+    for p in (0.6, 0.7, 0.8, 0.9):
         try:
-            es, dd = box_dimension(snaps_for(L, rho, p), L)
-        except OSError:
+            x, age, disp = age_profile(L, rho, p)
+        except (OSError, ValueError):
             continue
-        # p = 0 is the well-mixed baseline: even there the wall point set looks
-        # low-dimensional at small eps, purely from the discreteness of the points
-        c.plot(es, dd, "o-", color=COL[p], lw=2.4 if p else 1.6,
-               ls="-" if p else "--", ms=6, label="$p=%g$" % p)
-    c.axhline(1, color="k", ls=":", lw=1.2)
-    c.axhline(2, color="k", ls=":", lw=1.2)
-    c.set(xscale="log", xlabel=r"box size $\epsilon$", ylabel=r"$d_f(\epsilon)$", ylim=(0.5, 2.3))
-    c.legend(frameon=False, fontsize=13, loc="lower right")
+        c.plot(x, age, "-", color=COL[p], lw=2.4, label="$p=%g$" % p)
+        c2.plot(x, disp, "--", color=COL[p], lw=1.6)
+    c.set(xscale="log", yscale="log", xlabel="$s$", ylabel="age at emission (sweeps)")
+    c2.set_yscale("log"); c2.set_ylabel("distance walked", fontsize=18)
+    c.plot([], [], "k-", lw=2.4, label="age")
+    c.plot([], [], "k--", lw=1.6, label="distance")
+    c.legend(frameon=False, fontsize=13, loc="upper left", bbox_to_anchor=(0.10, 0.98))
 
     # (d) does the crossover scale move with the system?
+    mk = {256: "^", 512: "o", 1024: "s"}
     for LL in Ls:
         ps, ss = [], []
         for p in (0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95):
