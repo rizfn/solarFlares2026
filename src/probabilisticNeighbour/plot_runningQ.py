@@ -17,6 +17,15 @@
 #     P_emis(s)  =  P_coll(s) * [1 - q(s)]   the annihilating subset
 #
 # No fitted parameters anywhere: q(s) goes in, three spectra come out.
+#
+# It does not work well enough to build on. The mean residual tau_pred - tau_meas is
+# -0.004 at p=0.5 and -0.018 at p=0.6, but climbs to +0.058 at p=0.9 and +0.062 at p=1:
+# above the transition the running form predicts an upturn in the local exponent at
+# large s that the spot spectrum does not show, and it is pinned near 3/2 there anyway,
+# so the test has little leverage. At p=0.5 the predicted variation is about twice the
+# measured one, in the other direction. Panel (d) still rebuilds the bent emission
+# spectrum over eight decades, but that is mostly the (1 - q) factor, which is measured
+# rather than predicted.
 import os
 import numpy as np
 import matplotlib.pyplot as plt

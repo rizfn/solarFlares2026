@@ -11,11 +11,11 @@
 # fraction of those collisions that actually annihilate, and it is U-shaped: falling
 # at small s, rising at large s. Its minimum is the crossover scale.
 #
-# The U comes from the geometry. Box-counting the set where + and - sit close enough
-# to react gives dimension 1 below a length xi(p) and dimension 2 above it: domains
-# are compact, so reactions are confined to their 1D boundaries at short range, while
-# at long range many domains tile the plane and the reactive set fills space again.
-# xi(p) is independent of L for every p < 1, and only at p = 1 does it grow with L.
+# Why the U has that shape is not established. s* itself is well behaved: it is
+# independent of L for 0.70 <= p <= 0.90, and correlatedOrBipole shows it is a function
+# of q alone, the same under two very different injection rules. The depth is not -- the
+# minimum keeps falling with L (roughly L^-0.7 over 256-1024), so the U deepens with
+# system size while staying put.
 import os
 import numpy as np
 import matplotlib.pyplot as plt

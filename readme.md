@@ -5,8 +5,12 @@ This project aims at simplifying [Hughes et al's model](https://doi.org/10.1103/
 
 ### Project Structure:
 
-- `src` contains the source code
-- `docs` contains interactive visualizations and presentations, if any exist
+- `src` contains the source code, one directory per model variant:
+  - `probabilisticNeighbour` — the main model and its analysis; start with its `readme.md`
+  - `probabilisticNeighbourServer` — the same physics, packaged for the compute server
+  - `probNeighbour3D` — the same rules on a cubic lattice
+  - `addedBipole`, `correlatedOrBipole` — variants of the injection rule
+  - `PUKPaper` — the earlier random/neighbour-addition figures
 
 
 ### Getting started

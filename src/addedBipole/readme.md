@@ -8,7 +8,7 @@ only parameter is *where that pair goes*:
 - with probability `r`, the `+` and `-` are placed as lattice **neighbours** (a bipole),
 - with probability `(1-r)`, they are placed at two **independent** random empty sites.
 
-`r=1` is the `p=0` limit of `probabilisticNeighbour`; `r=0` is new.
+`r=0` is the `p=0` limit of `probabilisticNeighbour`; `r=1` is new.
 
 ## Why this parameter
 

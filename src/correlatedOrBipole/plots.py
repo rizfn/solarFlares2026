@@ -7,6 +7,11 @@
 # other -- and changes nothing else. If the attribution holds, the falling branch should
 # weaken or vanish while the rising branch and the sliding exponent survive.
 #
+# It does not. The falling branch survives and steepens, because a bipole self-annihilates
+# at s = 1 and supplies its own small-s excess. The useful result is the other one: at
+# matched q, the two rules give the same tau_m, the same s* and the same psi, so the
+# injection rule enters the cascade only by setting q. plot_collapse_vs_q is that figure.
+#
 # Every figure overlays the two models at matched p, L and rho.
 import os
 import numpy as np
@@ -65,8 +70,8 @@ def spectra(L, rho, p, bipole=True):
 
 def crossover_scale(x, r):
     # s* = the minimum of 1 - q(s), on a smoothed curve so one noisy bin cannot claim
-    # it. nan if the minimum sits at an edge, i.e. the U is not resolved -- which is
-    # exactly the outcome this model is built to produce.
+    # it. nan if the minimum sits at an edge, i.e. the U is not resolved, which happens
+    # only at p = 1 where there is no U in either model.
     if len(r) < 7:
         return np.nan
     lr = np.log(r)

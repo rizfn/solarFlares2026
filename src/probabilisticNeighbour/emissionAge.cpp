@@ -3,12 +3,9 @@
 // picture that small emissions are spots injected straight into a wrong-sign domain
 // (dying young and small) while large ones are spots injected into their own domain
 // that grow while random-walking until they reach a wall.
-// Splits the emission spectrum by the mass ratio of the annihilating pair, to test
-// whether the two-slope structure at intermediate p is a mixture of two channels:
-// unequal-mass annihilation (a small spot dying inside a domain) and comparable-mass
-// annihilation (two domain-scale spots meeting). Also logs the branching ratio q
-// resolved by mass ratio, which is the quantity the sub-leading balance is sensitive to.
-// usage: ./emissionChannels L rho steps p seed [outDir]
+// Superset of emissionChannels.cpp: it also writes everything that one does, so the two
+// share output names and plotting code.
+// usage: ./emissionAge L rho steps p seed [outDir]
 
 #include <cmath>
 #include <random>
@@ -107,11 +104,11 @@ Hist *emisOwn = nullptr, *emisRand = nullptr;   // emissions split by that origi
 constexpr int NLIFE = 40;             // log bins in lifetime, 6 per decade
 long long lifeOwn[NLIFE] = {0}, lifeRand[NLIFE] = {0};
 long long joint[NLIFE][NAGE] = {{0}};   // (lifetime, emitted size) at each annihilation
-long long qAgeC[NLIFE] = {0}, qAgeA[NLIFE] = {0};
-long long qNC[NLIFE] = {0}, qNA[NLIFE] = {0};      // merge vs annihilate, by that count
+long long qAgeC[NLIFE] = {0}, qAgeA[NLIFE] = {0};  // merge vs annihilate, by the age of
+                                                   // the smaller partner, over ALL collisions
+long long qNC[NLIFE] = {0}, qNA[NLIFE] = {0};      // the same, by collisions survived
 double ncSizeSum[NLIFE] = {0}; long long ncSizeN[NLIFE] = {0};
-long long jointN[NLIFE][NAGE] = {{0}};   // (collisions survived, emitted size)  // merge vs annihilate, by the age of
-                                                  // the smaller partner, over ALL collisions
+long long jointN[NLIFE][NAGE] = {{0}};             // (collisions survived, emitted size)
 
 std::array<int, 4> neighbours(int i, int L)
 {

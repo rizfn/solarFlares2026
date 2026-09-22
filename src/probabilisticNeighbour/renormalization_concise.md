@@ -245,7 +245,9 @@ $$
 Eq. (5) is tested against three numerical routes: a well-mixed Monte Carlo of the
 same process (complete graph, $q$ imposed as a rule, $N=2\times10^5$ spots),
 direct integration of Eq. (1) to steady state, and the 2D lattice model
-($L=128$, $\rho=0.2$). Exponents from the Hill estimator above $m\ge10$.
+($L=128$, $\rho=0.2$). Exponents from the Hill estimator above $m\ge10$, which is biased
+a few hundredths high by the pre-asymptotic region and the cutoff; `plots.py` uses a
+windowed fit instead, and the figures carry those values, not these.
 
 | $q$ | Eq. (5) | well-mixed MC | rate equation | 2D lattice |
 |-----|-----|-----|-----|-----|

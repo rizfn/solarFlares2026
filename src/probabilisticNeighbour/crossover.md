@@ -95,9 +95,8 @@ Small flares come from spots that die where they were born; large ones from spot
 have lived a thousand times longer and wandered fifty sites. The distance goes as the
 square root of the time at every $p$, so the wandering is an ordinary random walk.
 
-Injecting into the wrong region does make the small flares. Spots dropped at random are
-likelier to be destroyed than spots placed beside their own kind, and they release far
-less when they are:
+Spots dropped at random are likelier to be destroyed than spots placed beside their own
+kind, and they release far less when they are:
 
 | $p$ | injections dropped at random | flares they cause | mean size released, random vs placed |
 |---|---|---|---|
@@ -105,9 +104,18 @@ less when they are:
 | 0.8 | 20% | 34.1% | 1.49 vs 2.49 |
 | 0.9 | 10% | 27.9% | 1.55 vs 3.74 |
 
-At $p=0.9$ a randomly dropped spot is three and a half times likelier to be destroyed.
-The excess is concentrated at sizes of one to three, so this starts the falling side but
-does not account for all of it.
+At $p=0.9$ a randomly dropped spot is three and a half times likelier to be destroyed,
+and the excess is concentrated at sizes of one to three.
+
+**This does not explain the falling side.** `correlatedOrBipole` replaces the random
+channel with a bipole — the $+$ and $-$ injected adjacent to each other, so no lone
+minority charge is ever dropped into a hostile domain — and the falling side survives,
+steeper, with $s^*$ two to three times smaller. A bipole is its own nearest opposite
+sign, so it self-annihilates at $s=1$ and supplies its own small-$s$ excess. Both rules
+contaminate small $s$; neither is a clean control, and the falling side is not an
+artefact of either. What that comparison does establish is that $s^*$, the depth and
+$\psi$ are functions of the measured $q$ alone: at matched $q$ the two injection rules
+agree to a few percent in all three, at $L=256$, 512 and 1024.
 
 ## What the picture predicts
 
@@ -155,4 +163,8 @@ two-dimensional value is neither.
 
 $s^*$ is the same at $L=256$, 512 and 1024 for $0.70\le p\le0.90$, so the bend is real
 and survives to infinite size. Outside that range it drifts with $L$, and at $p=1$ there
-is no bend at all.
+is no bend at all. Its *depth* is a separate matter and is not converged: the value of
+$f$ at the minimum keeps falling with system size, roughly as $L^{-0.7}$ over
+$L=256$–1024 and at the same rate under both injection rules, while the small-$s$ end of
+$f$ and the position $s^*$ both stay put. The U therefore deepens as the box grows, and
+nothing here explains why.

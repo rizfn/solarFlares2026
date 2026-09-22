@@ -1,6 +1,6 @@
 # The closed form against the well-mixed Monte Carlo.
 #
-# The sub-leading balance of the rate equation (renormalization.md S5) fixes the spot
+# The sub-leading balance of the rate equation (renormalization.md S4) fixes the spot
 # exponent from the branching ratio alone:  cos(pi tau_m) = (1 - q) / q,  on the branch
 # tau_m in [3/2, 2]. It has no solution for q < 1/2. wellMixed.cpp runs the same process
 # as an exact stochastic simulation with q imposed as a rule, so the two can be compared

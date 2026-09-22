@@ -38,49 +38,38 @@ lone minority charge into a hostile domain.
 
 The hypothesis is **wrong**, and the replacement is better.
 
-At `L=256`, `rho=0.2`, the U in `1 - q(s)` does not weaken. It gets *deeper*, its falling
-branch gets *steeper*, and `s*` moves *down* by a factor of 2 to 3 at every `p`. A bipole
-is its own nearest opposite sign, so it self-annihilates at `s=1` and floods the small-`s`
-bins with its own artefact — a different contamination, not less of it. Both injection
-rules contaminate small `s`; neither is the clean control.
+The U in `1 - q(s)` does not weaken. It gets *deeper*, its falling branch gets *steeper*,
+and `s*` moves *down* by a factor of 2 to 3 at every `p`. A bipole is its own nearest
+opposite sign, so it self-annihilates at `s=1` and supplies its own small-`s` excess.
+Both injection rules contaminate small `s`; neither is a clean control. So
+`crossover.md`'s attribution of the falling branch to wrong-domain monomer drops does not
+hold.
 
 But comparing at fixed `p` was the wrong comparison, because the injection rule also
-changes `q`. Against the measured `q` the two models **collapse onto one curve**, in both
-observables:
+changes `q`. Against the measured `q` the two models **collapse onto one curve** — in the
+exponent, the crossover scale, the depth of the U and `psi` alike (`L=1024`, `rho=0.2`):
 
-| `q` | `tau_m` | `s*` | | `q` | `tau_m` | `s*` |
-|---|---|---|---|---|---|---|
-| 0.8768 (bip) | 1.511 | 113.4 | | 0.8798 (mono) | 1.509 | 113.9 |
-| 0.9112 (bip) | 1.497 |  81.3 | | 0.9183 (mono) | 1.494 |  75.0 |
-| 0.9302 (bip) | 1.489 |  53.7 | | 0.9362 (mono) | 1.486 |  36.1 |
+| `q` | `tau_m` | `s*` | `(1-q)` at min | `psi` |
+|---|---|---|---|---|
+| 0.9439 (bip)  | 1.484 | 81.6 | 0.0241 | 0.275 |
+| 0.9499 (mono) | 1.481 | 82.4 | 0.0254 | 0.264 |
+| 0.9617 (bip)  | 1.477 | 52.4 | 0.0216 | 0.265 |
+| 0.9704 (mono) | 1.473 | 53.6 | 0.0207 | 0.266 |
 
 Two injection rules that differ as much as two rules can — one drops isolated charges into
-random domains, the other places locally neutral dipoles — produce the same exponent and
-the same crossover scale whenever they produce the same `q`. The collapse is tight for
-`q >~ 0.87` and loosens to a factor `~1.5` in `s*` by `q ~ 0.65`.
+random domains, the other places locally neutral dipoles — agree to a few percent whenever
+they produce the same `q`. Tight for `q >~ 0.87`, loosening to a factor `~1.5` in `s*` by
+`q ~ 0.65`, and the same at `L=256`, 512 and 1024. `p=1` is identical in both models by
+construction (`q=0.9860`, `tau_m=1.466`, `tau_s=1.724`), which is the sweep's built-in
+consistency check.
 
 So `s*` is not an injection artefact and not a property of the injection rule at all: like
-`tau_m`, it is a function of `q`. That is the statement `probabilisticNeighbour/
-plot_runningQ.py` needs — there the whole spectrum is rebuilt from the single measured
-function `q(s)`, and this says the reduction to `q` is a property of the model class
-rather than a coincidence of one injection rule.
+`tau_m`, it is a function of `q`.
 
-`crossover.md`'s attribution of the falling branch to wrong-domain monomer drops should be
-withdrawn.
-
-## What was originally being looked for
-
-- **Decisive:** the falling branch of `1 - q(s)` flattens or disappears, and
-  `crossover_scale` returns `nan` because the minimum runs off the small-`s` edge. Then
-  `s*` was never intrinsic, the spectrum is a single power law over its whole range, and
-  the running-`q` reading of `probabilisticNeighbour/plot_runningQ.py` applies
-  everywhere rather than only above `s*`.
-- **Also informative:** the exponent must still slide with `p`. If it does not, the
-  bipole has changed the cascade and not merely the injection, and the comparison is
-  void.
-- **Negative result:** the U survives at the same `s*`. Then the falling branch is not an
-  injection artefact and `crossover.md`'s mechanism is wrong, which is worth knowing
-  before it goes into a manuscript.
+One thing does **not** collapse across system size: the depth. The value of `1 - q` at the
+minimum falls as roughly `L^-0.7` from `L=256` to 1024, at the same rate in both models,
+while the small-`s` end and the position `s*` stay put — so the U deepens as the box grows.
+Unexplained.
 
 Note that the bipole also suppresses `q` on its own — see `addedBipole`, where pure
 bipole injection drives `q` from `0.500` down to `0.388` and the exponent locks at the

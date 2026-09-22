@@ -668,7 +668,11 @@ touching $\tau$.
 
 ## 7. What the simulation says
 
-$L=128$, $\rho=0.2$, exponents from the Hill estimator above $m,s \ge 10$:
+$L=128$, $\rho=0.2$, exponents from the Hill estimator above $m,s \ge 10$. Note that
+`plots.py` no longer fits this way — a Hill estimator is biased upward by both the
+pre-asymptotic small-$m$ region and the cutoff, and the bias does not go away with more
+statistics — so these numbers run a few hundredths high and are not the ones in the
+figures. $L=128$ is also too small for $\tau_s$, which drifts until $L\approx512$.
 
 | $p$ | $\tau_m$ (spot) | $\tau_s$ (emission) | $2\tau_m - 1$ |
 |-----|-----|-----|-----|
@@ -688,8 +692,9 @@ only happen on the *interfaces* between domains, so the colliding pair is not
 drawn from the bulk distribution at all. The derivation in Section 5 assumed it
 was.
 
-The segregation order parameter is flat and near zero up to $p\approx0.6$ and
-climbs steeply after, while $\tau$ does not notice $p_c$ at all.
+The segregation order parameter is flat and near zero up to $p\approx0.7$ and
+climbs steeply after, while $\tau$ does not notice $p_c$ at all. The threshold is
+bracketed rather than measured: no finite-size-scaling analysis of $p_c$ has been done.
 
 ---
 
