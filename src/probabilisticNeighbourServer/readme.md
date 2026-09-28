@@ -67,3 +67,19 @@ cd src/probabilisticNeighbour && python plots.py
 
 Leave the files gzipped -- `numpy.loadtxt` decompresses transparently and the snapshot
 reader uses `gzip.open`. If you ever do want them expanded, `gunzip *.gz` in `outputs/`.
+
+## The density sweep
+
+`run_density.sh` is a second, smaller grid for the density figure: `L=512`, 10⁵ sweeps,
+`rho = 0.05 ... 0.9` at `p = 0.3, 0.5, 0.8, 0.9`. Same binary, same resume rule, same
+output names, so it can share `OUTDIR` with the main sweep (whose `rho=0.2` runs it then
+skips). Seeds are chosen with `SEED_LO`/`SEED_HI`, so the halves can run on different
+machines:
+
+```bash
+OUTDIR=/nbi/home/rpw391/cell-disk/solarFlares/outputs SEED_LO=9 SEED_HI=16 nohup ./run_density.sh &> density.out &
+```
+
+Dense runs are much dearer: on a fully loaded 16-core laptop a `rho=0.9` run took ~5.5 h
+wall and `rho=0.8` about 5 h, against ~1 h at `rho=0.1`. Under load the cost is set by
+memory, not the cores -- 30 concurrent `L=512` jobs no longer fit in cache.
