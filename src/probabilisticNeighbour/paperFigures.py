@@ -5,11 +5,12 @@
 # cached per seed on a fixed log grid (outputs/figcache), so every figure after the first
 # run is a few seconds.
 #
-#   fig1  lattice snapshots at two densities, with the correlation length xi(p)
+#   fig1  lattice snapshots at two densities, with the order parameter Phi(p)
 #   fig2  the spectra: n(m), P(s), both compensated, and the break s*(p)
 #   fig3  exponents against the closed form cos(pi tau_m) = (1-q)/q
 #   fig4  density scaling: rho = 0.05-0.9 on both sides of p_c, L = 512
 #   fig5  the branching ratio q(p), which is what the closed form actually needs
+#   fig6  every exponent against p, with Phi on a second axis
 #
 # Colours. Four fixed ones, everything else built from them: red and blue are the two
 # signs of a spot, exactly as on a lattice snapshot; C_SPOT carries every spot-size
@@ -32,7 +33,7 @@ PLOTS = os.path.join(DIR, "plots", "paper")
 
 plt.rcParams.update({
     "font.size": 24, "axes.labelsize": 32, "xtick.labelsize": 25, "ytick.labelsize": 25,
-    "legend.fontsize": 22, "axes.linewidth": 1.6, "xtick.major.width": 1.6,
+    "legend.fontsize": 25, "axes.linewidth": 1.6, "xtick.major.width": 1.6,
     "ytick.major.width": 1.6, "xtick.minor.width": 1.1, "ytick.minor.width": 1.1,
     "xtick.major.size": 9, "ytick.major.size": 9, "xtick.minor.size": 5,
     "ytick.minor.size": 5, "xtick.direction": "in", "ytick.direction": "in",
@@ -193,17 +194,24 @@ def slope(h, lo, hi, minc=20):
     return -np.polyfit(x, y, 1, w=w)[0]
 
 
-def window(h, lo=60.0, ftop=3e-4):
-    # Scaling window [lo, hi]: hi is the quantile above which a fraction ftop of the mass
-    # lies, not the largest event seen. A single extreme value jumps around between
-    # parameter points and made tau(p) visibly jagged when it set the upper edge.
-    cc = np.cumsum(h[::-1])[::-1] / h.sum()
-    ok = cc >= ftop
-    hi = CTR[ok].max() if ok.any() else CTR[-1]
-    return lo, max(hi, 10 * lo)
+def window(h, lo=100.0, ftop=1e-3):
+    # Scaling window [lo, hi]. hi is the size above which a fraction ftop of the events
+    # *beyond lo* lie, not of all events, and not the largest event seen (a single extreme
+    # value jumps around between parameter points). The quantile has to be conditional:
+    # flare counts are dominated by s = 1, so an unconditional one lands below lo, the
+    # window collapsed to [lo, 10 lo], and the fit read the pre-asymptotic curvature at
+    # small s -- tau_s = 3.12 at p = 0 where the local slope settles at 3.00.
+    # lo = 100 clears both that curvature and the binning comb below ~60.
+    sel = CTR >= lo
+    hh = np.where(sel, h, 0.0)
+    if hh.sum() == 0:
+        return lo, 10 * lo
+    cc = np.cumsum(hh[::-1])[::-1] / hh.sum()
+    ok = sel & (cc >= ftop)
+    return lo, max(CTR[ok].max(), 10 * lo)
 
 
-def tau_seeds(H, lo=60.0, ftop=3e-4, **kw):
+def tau_seeds(H, lo=100.0, ftop=1e-3, **kw):
     # one exponent per seed, so the spread across seeds is an honest error bar
     a, b = window(H.sum(axis=0), lo, ftop)
     t = np.array([slope(h, a, b, **kw) for h in H])
@@ -337,7 +345,7 @@ def lattice_tau(L=512, rho=0.2):
         tm, em = tau_pm(hist("spotSize", L, rho, p))
         H = hist("emission", L, rho, p)
         broken = np.isfinite(branches(H.sum(axis=0))[2])
-        ts, es = upper_tau(H) if broken else tau_pm(H, lo=20.0)
+        ts, es = upper_tau(H) if broken else tau_pm(H)
         rows.append((q, tm, em, ts, es, p, float(broken)))
     return np.array(rows)
 
@@ -408,63 +416,40 @@ def read_snaps(L, rho, p, nseed=8):
     return out
 
 
-def radial_corr(snaps, L):
-    # C(r): sign correlation of occupied pairs at separation r, conditioned on both sites
-    # being occupied, by FFT and radially averaged
-    num = np.zeros((L, L)); den = np.zeros((L, L))
-    for a in snaps:
-        sg = a.astype(float); oc = (a != 0).astype(float)
-        num += np.fft.irfft2(np.abs(np.fft.rfft2(sg)) ** 2, s=(L, L))
-        den += np.fft.irfft2(np.abs(np.fft.rfft2(oc)) ** 2, s=(L, L))
-    num = np.fft.fftshift(num); den = np.fft.fftshift(den)
-    c = L // 2
-    yy, xx = np.indices((L, L))
-    r = np.round(np.hypot(yy - c, xx - c)).astype(int).ravel()
-    return np.bincount(r, num.ravel()) / np.bincount(r, den.ravel())
-
-
-def corr_length(L, rho, p, rmax=6):
-    # xi from the short range of C(r): an exponential fit over r = 1..6.
-    # Only the short range is physical. The lattice holds equal + and -, so sum_r C(r) = 0
-    # and the tail is a finite-size artefact; any estimator that follows the tail returns
-    # xi ~ L. In the segregated phase the true length is the box, and this estimator,
-    # blind to r > 6, keeps growing without saturating at it -- read it as a monotone
-    # measure of how ordered the surface is, not as a domain size.
-    # Only the contiguous r >= 1 where C clears three times the noise enter the fit, the
-    # noise being C measured on the same snapshots with the signs shuffled. If C(1) is
-    # itself noise, xi = 0: at p = 0 there is no correlation to measure.
-    key = os.path.join(CACHE, f"xi3_L_{g(L)}_rho_{g(rho)}_p_{g(p)}.npy")
+def order_parameter(L, rho, p, nb=8):
+    # Phi: the phase-separation order parameter. The lattice holds equal + and -, so the
+    # total magnetisation is zero and cannot order; instead coarse-grain at a scale tied
+    # to the box. Cut it into nb x nb blocks of side L/nb, take |sum of signs| / (number
+    # of spots) in each, and average. A mixed surface still gives a nonzero value from
+    # sqrt(n) fluctuations, so that floor -- measured on the same snapshots with the signs
+    # shuffled -- is subtracted in quadrature. Phi ~ 0 when mixed, -> 1 when segregated.
+    key = os.path.join(CACHE, f"phi_L_{g(L)}_rho_{g(rho)}_p_{g(p)}_nb_{nb}.npy")
     if os.path.exists(key):
         return float(np.load(key))
-    snaps = read_snaps(L, rho, p)
+    b = L // nb
     rng = np.random.default_rng(0)
-    shuf = []
-    for a in snaps:
-        t = a.ravel().copy()
+    raw, floor = [], []
+    for sn in read_snaps(L, rho, p, nseed=8 if L <= 512 else 3):
+        t = sn.ravel().copy()
         occ = t != 0
         v = t[occ]; rng.shuffle(v); t[occ] = v
-        shuf.append(t.reshape(L, L))
-    C = radial_corr(snaps, L)
-    floor = 3 * np.sqrt(np.mean(radial_corr(shuf, L)[1:rmax + 1] ** 2))
-    rr = np.arange(1, rmax + 1)
-    bad = np.nonzero(C[rr] <= floor)[0]
-    rr = rr[:bad[0]] if len(bad) else rr
-    if len(rr) == 0:
-        xi = 0.0
-    elif len(rr) == 1:
-        xi = np.nan
-    else:
-        xi = -1.0 / np.polyfit(rr, np.log(C[rr]), 1)[0]
+        for field, acc in ((sn, raw), (t.reshape(L, L), floor)):
+            blk = field.astype(float).reshape(nb, b, nb, b)
+            num = np.abs(blk.sum(axis=(1, 3)))
+            den = np.abs(blk).sum(axis=(1, 3))
+            acc.append((num[den > 0] / den[den > 0]).mean())
+    m, m0 = np.mean(raw), np.mean(floor)
+    phi = float(np.sqrt(max(m * m - m0 * m0, 0.0)))
     os.makedirs(CACHE, exist_ok=True)
-    np.save(key, np.array(xi))
-    return xi
+    np.save(key, np.array(phi))
+    return phi
 
 
 def fig1_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
     # The surface itself: + spots red, - spots blue, empty sites white, one row per
     # density. Correlating the injection turns a salt-and-pepper mixture into domains of
-    # one sign. The band below is the correlation length for both rows, with the snapshot
-    # p values marked; the denser surface orders at slightly smaller p.
+    # one sign. The band below is the order parameter Phi for both rows, with the snapshot
+    # p values marked: ~0 up to p ~ 0.55, then rising; the denser surface orders earlier.
     cmap = mcolors.ListedColormap([C_NEG, "white", C_POS])
     nr, nc = len(rhos), len(ps)
     fig = plt.figure(figsize=(5.2 * nc + 1.2, 5.2 * nr + 3.8))
@@ -484,17 +469,15 @@ def fig1_snapshots(L=128, rhos=(0.2, 0.6), ps=(0.0, 0.5, 1.0)):
                 ax.set_ylabel(rf"$\rho={g(r)}$", fontsize=32, labelpad=10)
 
     band = fig.add_subplot(gs[nr, :])
-    for r, col, mk in zip(rhos, seq(rhos, CM_EMIS, lo=0.25, hi=0.95), ("o", "s")):
+    for r, col in zip(rhos, seq(rhos, CM_EMIS, lo=0.25, hi=0.95)):
         pp = available("snapshots", L, r)
-        xi = np.array([corr_length(L, r, p) for p in pp])
-        ok = np.isfinite(xi)
-        band.plot(np.array(pp)[ok], xi[ok], mk + "-", color=col, ms=11,
-                  lw=2.8, mec="white", mew=1.2, label=rf"$\rho={g(r)}$")
+        band.plot(pp, [order_parameter(L, r, p) for p in pp], "-", color=col, lw=3.4,
+                  label=rf"$\rho={g(r)}$")
     for p in ps:
         band.axvline(p, color=C_REF, ls=":", lw=1.8, zorder=0)
-    band.set_xlim(-0.02, 1.02)
+    band.set_xlim(-0.02, 1.02); band.set_ylim(-0.03, 1.0)
     band.set_xlabel("neighbour probability $p$")
-    band.set_ylabel(r"$\xi$")
+    band.set_ylabel(r"$\Phi$")
     band.legend(frameon=False, loc="upper left", ncol=2)
     grid(band)
     save(fig, f"fig1_snapshots_L_{g(L)}.png")
@@ -608,13 +591,13 @@ def fig3_mean_field(N=200000, L=512, rho=0.2):
     ok = qs >= 0.5
     lat = lattice_tau(L, rho)
     mix = lat[:, 6] == 0
-    c_th = CM_EMIS(1.0)                     # the closed form: a result, so a colour of its own
-    c_mc = tint(C_SPOT, 0.15)
+    c_th = tint(C_SPOT, 0.1)                # the closed form: a result, so a colour of its own
+    c_mc = CM_EMIS(1.0)
     xs = dict(marker="x", ls="none", color=c_mc, ms=12, mew=3.0, zorder=4)
     dots = dict(marker="o", color=C_POS, ms=12, mec="white", mew=1.2)
 
     qc = np.linspace(0.5, 0.9995, 600)
-    a1.plot(qc, tau_closed(qc), "-", color=c_th, lw=5, zorder=2,
+    a1.plot(qc, tau_closed(qc), "-", color=c_th, lw=3, zorder=2,
             label=r"$\cos\pi\tau_m=\dfrac{1-q}{q}$")
     a1.plot(qs[ok], tm[ok], label="well-mixed MC", **xs)
     a1.plot(lat[:, 0], lat[:, 1], "-", lw=2.4, zorder=3, label=rf"2D lattice, $L={L}$", **dots)
@@ -627,7 +610,8 @@ def fig3_mean_field(N=200000, L=512, rho=0.2):
     grid(a1)
 
     lo, hi = 1.8, 4.2
-    a2.plot([lo, hi], [lo, hi], "--", color=C_REF, lw=3.5, zorder=1, label=r"$\tau_s=2\tau_m-1$")
+    a2.plot([lo, hi], [lo, hi], "--", color=tint(C_REF, -0.45), lw=3.0, zorder=1,
+            label=r"$\tau_s=2\tau_m-1$")
     a2.plot(2 * tm - 1, ts, label="well-mixed MC", **xs)
     a2.plot(2 * lat[mix, 1] - 1, lat[mix, 3], ls="none", zorder=4,
             label=r"2D lattice, $p<p_c$", **dots)
@@ -636,7 +620,7 @@ def fig3_mean_field(N=200000, L=512, rho=0.2):
     a2.set_xlabel(r"$2\tau_m-1$")
     a2.set_ylabel(r"flare exponent $\tau_s$")
     a2.set_xlim(lo, hi); a2.set_ylim(1.55, hi)
-    a2.legend(frameon=False, loc="lower right", labelspacing=0.3, fontsize=20)
+    a2.legend(frameon=False, loc="lower right", labelspacing=0.3)
     grid(a2)
 
     fig.tight_layout()
@@ -679,7 +663,7 @@ def fig4_density_scaling(L=512, rhos=RHOS_D, p_lo=0.3, p_hi=0.9):
                 t = np.nanmedian([upper_tau(H)[0] for H in Hs])
                 sym = "s"
             else:
-                t = np.median([tau_pm(H, lo=20.0)[0] for H in Hs])
+                t = np.median([tau_pm(H)[0] for H in Hs])
                 sym = "s"
             x0, y0 = density(Hs[len(Hs) // 2].sum(axis=0), minc=30, k=4)
             xg = 3e2 if kind == "spotSize" or t > 2 else 1e3
@@ -688,7 +672,7 @@ def fig4_density_scaling(L=512, rhos=RHOS_D, p_lo=0.3, p_hi=0.9):
                     color=C_REF, fontsize=27, ha="right", va="center")
             if i == 0:
                 ax.legend(frameon=False, loc="upper right", labelspacing=0.2,
-                          handlelength=1.3, fontsize=21)
+                          handlelength=1.3, fontsize=24)
             grid(ax)
     fig.tight_layout()
     save(fig, f"fig4_densityScaling_L_{g(L)}_p_{g(p_lo)}_{g(p_hi)}.png")
@@ -725,9 +709,55 @@ def fig5_branching_ratio(L=128, rhos=RHOS_SW, Ls=(128, 256, 512, 1024), rho=0.2)
     save(fig, f"fig5_branchingRatio_L_{g(L)}.png")
 
 
+
+def fig6_exponents(L=512, rho=0.2):
+    # Every exponent against p on one axis, with the order parameter Phi on the other.
+    # tau_m (C_SPOT) slides from 2 to 3/2 and holds from p ~ 0.7. Below p_c the flare
+    # spectrum is one power law, and tau_s (C_EMIS) lies above the mean-field 2 tau_m - 1
+    # (dashed, same colour). Once the break s* is visible the flare spectrum is two power
+    # laws, and what is plotted is the branch above s*, at ~1.74 for every p. The step
+    # between p = 0.6 and 0.65 is where the break enters the scaling range; its position
+    # depends on L, and the steep side below s* is not a clean power law, so it is left out.
+    ps = available("emission", L, rho)
+    tm, ts, ph = [], [], []
+    for p in ps:
+        tm.append(tau_pm(hist("spotSize", L, rho, p))[0])
+        H = hist("emission", L, rho, p)
+        broken = np.isfinite(branches(H.sum(axis=0))[2])
+        ts.append(upper_tau(H)[0] if broken else tau_pm(H)[0])
+        ph.append(order_parameter(L, rho, p))
+    ps, tm, ts, ph = map(np.array, (ps, tm, ts, ph))
+
+    c_s, c_m, c_ph = CM_EMIS(0.9), CM_SPOT(0.75), C_NEG
+    fig, ax = plt.subplots(figsize=(12.5, 8.8))
+    ax.plot(ps, ts, "o-", color=c_s, ms=12, lw=3.0, mec="white", mew=1.2, zorder=4,
+            label=r"flare exponent $\tau_s$")
+    ax.plot(ps, 2 * tm - 1, "--", color=c_s, lw=3.0, zorder=2,
+            label=r"mean field, $\tau_s = 2\tau_m-1$")
+    ax.plot(ps, tm, "^-", color=c_m, ms=13, lw=3.0, mec="white", mew=1.2, zorder=3,
+            label=r"spot exponent $\tau_m$")
+    ax.plot([], [], "s:", color=c_ph, ms=11, lw=2.8, mec="white", mew=1.2,
+            label=r"order parameter $\Phi$ (right)")
+    ax.set_xlabel("neighbour probability $p$")
+    ax.set_ylabel(r"power-law exponent $\tau$")
+    ax.set_xlim(-0.03, 1.03); ax.set_ylim(1.35, 3.25)
+    ax.legend(frameon=False, loc="upper right", labelspacing=0.3, handlelength=1.8)
+    grid(ax)
+
+    a2 = ax.twinx()
+    a2.plot(ps, ph, "s:", color=c_ph, ms=11, lw=2.8, mec="white", mew=1.2)
+    a2.set_ylabel(r"order parameter $\Phi$", color=c_ph)
+    a2.tick_params(axis="y", colors=c_ph, direction="in")
+    a2.spines["right"].set_color(c_ph)
+    a2.set_ylim(-0.03, 1.0)
+    ax.tick_params(right=False)
+    fig.tight_layout()
+    save(fig, f"fig6_exponents_L_{g(L)}_rho_{g(rho)}.png")
+
 if __name__ == "__main__":
     fig1_snapshots()
     fig2_spectra()
     fig3_mean_field()
     fig4_density_scaling()
     fig5_branching_ratio()
+    fig6_exponents()

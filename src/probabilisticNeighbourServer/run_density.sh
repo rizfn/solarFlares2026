@@ -3,6 +3,9 @@
 #   SEED_LO=1 SEED_HI=8 ./run_density.sh     the first half (default)
 #   SEED_LO=9 SEED_HI=16 ./run_density.sh    the second half, later
 #   DRY_RUN=1 ./run_density.sh               print the plan only
+#   L, RHOS, PS, NSNAP and STEPS can be overridden the same way; the fine p grid behind
+#   the Phi band of fig1 is
+#   L=128 NSNAP=4 RHOS="0.6 0.2" PS="$(seq 0 0.01 1)" ./run_density.sh
 # On the server, point OUTDIR at the main sweep so its rho=0.2 runs are skipped:
 #   OUTDIR=/nbi/home/rpw391/cell-disk/solarFlares/outputs SEED_LO=9 SEED_HI=16 nohup ./run_density.sh &> density.out &
 # Resumes like run_server.sh: a run counts as done once its spotSize_*.tsv.gz exists.
@@ -15,16 +18,16 @@ SRC="$DIR/probabilisticNeighbourServer.cpp"
 EXECUTABLE="$DIR/probabilisticNeighbourServer"
 LOG="$DIR/run_density.log"
 
-L=512
-STEPS=100000
-NSNAP=8
+L=${L:-512}
+STEPS=${STEPS:-100000}
+NSNAP=${NSNAP:-8}
 SEED_LO=${SEED_LO:-1}
 SEED_HI=${SEED_HI:-8}
 DRY_RUN=${DRY_RUN:-0}
 MAX_JOBS=${MAX_JOBS:-$(nproc --ignore=2)}   # leave 2 cores free
 
-RHOS="0.9 0.8 0.6 0.4 0.2 0.1 0.05"   # densest first, so no long job is left stranded at the end
-PS="0.3 0.5 0.8 0.9"
+RHOS=${RHOS:-"0.9 0.8 0.6 0.4 0.2 0.1 0.05"}   # densest first, so no long job is left stranded at the end
+PS=${PS:-"0.3 0.5 0.8 0.9"}
 
 if [ ! -x "$EXECUTABLE" ] || [ "$SRC" -nt "$EXECUTABLE" ]; then
     echo "building..."
