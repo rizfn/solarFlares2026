@@ -416,20 +416,20 @@ def read_snaps(L, rho, p, nseed=8):
     return out
 
 
-def order_parameter(L, rho, p, nb=8):
+def order_parameter(L, rho, p, nb=8, nseed=24):
     # Phi: the phase-separation order parameter. The lattice holds equal + and -, so the
     # total magnetisation is zero and cannot order; instead coarse-grain at a scale tied
     # to the box. Cut it into nb x nb blocks of side L/nb, take |sum of signs| / (number
     # of spots) in each, and average. A mixed surface still gives a nonzero value from
     # sqrt(n) fluctuations, so that floor -- measured on the same snapshots with the signs
     # shuffled -- is subtracted in quadrature. Phi ~ 0 when mixed, -> 1 when segregated.
-    key = os.path.join(CACHE, f"phi_L_{g(L)}_rho_{g(rho)}_p_{g(p)}_nb_{nb}.npy")
+    key = os.path.join(CACHE, f"phi_L_{g(L)}_rho_{g(rho)}_p_{g(p)}_nb_{nb}_ns_{nseed}.npy")
     if os.path.exists(key):
         return float(np.load(key))
     b = L // nb
     rng = np.random.default_rng(0)
     raw, floor = [], []
-    for sn in read_snaps(L, rho, p, nseed=8 if L <= 512 else 3):
+    for sn in read_snaps(L, rho, p, nseed=nseed if L <= 512 else 3):
         t = sn.ravel().copy()
         occ = t != 0
         v = t[occ]; rng.shuffle(v); t[occ] = v
